@@ -86,6 +86,12 @@ class PlayerService with WidgetsBindingObserver {
   String? _activeTranscodeHlsUrl;
   String? _activeTranscodeCodec;
 
+  /// 当前歌曲实际播放的服务器转码格式；null 表示直连原始音源。
+  final ValueNotifier<String?> playbackTranscodeCodec = ValueNotifier(null);
+
+  /// 构建播放源时记录每首歌最终命中的转码格式，激活对应逻辑索引后再发布。
+  final Map<String, String> _resolvedPlaybackCodecs = {};
+
   /// 当前引擎 run 在逻辑队列中的起始索引。引擎 currentIndexStream 给的是
   /// 引擎内（run 内）索引，映射回逻辑索引需加该偏移。
   int _activeRunStart = 0;
@@ -353,6 +359,7 @@ class PlayerService with WidgetsBindingObserver {
       // 旧 HLS 不再代表当前网络策略，先清掉播放完成后的后台缓存标记并释放会话。
       _activeTranscodeHlsUrl = null;
       _activeTranscodeCodec = null;
+      playbackTranscodeCodec.value = null;
       await FeiNiuTranscodeService.instance.quitFor(song.id);
 
       await _activateLogicalIndex(
@@ -700,6 +707,7 @@ class PlayerService with WidgetsBindingObserver {
     }
     _activeTranscodeHlsUrl = null;
     _activeTranscodeCodec = null;
+    playbackTranscodeCodec.value = null;
     final list = queue.value;
     final idx = currentIndex.value;
     if (idx < 0 || list.isEmpty) return;
@@ -1115,6 +1123,7 @@ class PlayerService with WidgetsBindingObserver {
     );
     await _applyEngineVolume(target);
     await _applyEngineSpeed(target);
+    playbackTranscodeCodec.value = _resolvedPlaybackCodecs[newId];
   }
 
   /// 按引擎类型返回引擎实例（media_kit 懒创建）。
@@ -4022,6 +4031,7 @@ class PlayerService with WidgetsBindingObserver {
     SongEntity song, {
     bool forceRefresh = false,
   }) async {
+    _resolvedPlaybackCodecs.remove(song.id);
     final api = FeiNiuApiClient.instance;
     if (api.baseUrl.isNotEmpty) {
       // 播放出错重试时删除损坏/过期的缓存，强制走远端
@@ -4116,6 +4126,7 @@ class PlayerService with WidgetsBindingObserver {
           '[PlayerService] transcode ${song.title} -> LOCAL ${cached.path}',
         );
       }
+      _resolvedPlaybackCodecs[song.id] = codec;
       return AudioSource.file(cached.path);
     }
 
@@ -4140,6 +4151,7 @@ class PlayerService with WidgetsBindingObserver {
     // 不在构建源时立即下载，避免首次播放双倍带宽。
     _activeTranscodeHlsUrl = hlsUrl;
     _activeTranscodeCodec = codec;
+    _resolvedPlaybackCodecs[song.id] = codec;
     return AudioSource.uri(
       Uri.parse(hlsUrl),
       headers: FeiNiuApiClient.imageAuthHeaders(),

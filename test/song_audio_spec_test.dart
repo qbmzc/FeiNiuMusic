@@ -92,4 +92,26 @@ void main() {
       isEmpty,
     );
   });
+
+  test('player text distinguishes direct source from transcoded output', () {
+    const song = SongEntity(
+      id: 'dsf',
+      title: '',
+      artist: '',
+      format: 'dsf',
+      bitrate: 5645000,
+    );
+    expect(formatPlayerAudioSpec(song), 'DSF · 5,645 kbps · 直连');
+    expect(
+      formatPlayerAudioSpec(song, playbackCodec: 'mp3'),
+      '原始：DSF · 5,645 kbps\n播放：MP3 · 转码',
+    );
+    expect(
+      formatPlayerAudioSpec(
+        const SongEntity(id: 'unknown', title: '', artist: ''),
+        playbackCodec: 'opus',
+      ),
+      '播放：OPUS · 转码',
+    );
+  });
 }

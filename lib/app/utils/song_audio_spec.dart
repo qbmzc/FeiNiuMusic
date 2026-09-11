@@ -37,3 +37,15 @@ String formatSongAudioSpec(SongEntity? song) {
   ];
   return parts.join(' · ');
 }
+
+/// 播放器展示的音频链路：直连时标出原始规格；实际走服务器转码时同时展示
+/// 原始音源和当前播放格式。转码响应没有可靠的输出码率，因此不推测码率。
+String formatPlayerAudioSpec(SongEntity? song, {String? playbackCodec}) {
+  final source = formatSongAudioSpec(song);
+  final output = playbackCodec?.trim().toUpperCase();
+  if (output == null || output.isEmpty) {
+    return source.isEmpty ? '' : '$source · 直连';
+  }
+  if (source.isEmpty) return '播放：$output · 转码';
+  return '原始：$source\n播放：$output · 转码';
+}

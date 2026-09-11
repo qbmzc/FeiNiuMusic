@@ -18,7 +18,7 @@ const _flac = SongEntity(
   bitrate: 2850000,
   audioSpec: 'FLAC 96.0kHz 24bit 2850kbps',
 );
-const _label = 'FLAC · 2,850 kbps';
+const _label = 'FLAC · 2,850 kbps · 直连';
 
 void main() {
   setUpAll(() async {
@@ -30,10 +30,17 @@ void main() {
     'specification updates on song changes and hides without metadata',
     (tester) async {
       final song = ValueNotifier<SongEntity?>(_flac);
+      final codec = ValueNotifier<String?>(null);
       addTearDown(song.dispose);
+      addTearDown(codec.dispose);
       await tester.pumpWidget(
         MaterialApp(
-          home: Scaffold(body: PlayerAudioSpec(songListenable: song)),
+          home: Scaffold(
+            body: PlayerAudioSpec(
+              songListenable: song,
+              playbackCodecListenable: codec,
+            ),
+          ),
         ),
       );
       expect(find.text(_label), findsOneWidget);
@@ -47,8 +54,16 @@ void main() {
       );
       await tester.pump();
       expect(find.text(_label), findsNothing);
-      expect(find.text('AAC · 256 kbps'), findsOneWidget);
+      expect(find.text('AAC · 256 kbps · 直连'), findsOneWidget);
 
+      codec.value = 'mp3';
+      await tester.pump();
+      expect(
+        find.text('原始：AAC · 256 kbps\n播放：MP3 · 转码'),
+        findsOneWidget,
+      );
+
+      codec.value = null;
       song.value = const SongEntity(id: 'unknown', title: '', artist: '');
       await tester.pump();
       expect(find.byType(Tooltip), findsNothing);
@@ -62,8 +77,10 @@ void main() {
   testWidgets('narrow width and large text wrap without overflow', (
     tester,
   ) async {
-    final song = ValueNotifier<SongEntity?>(_flac);
-    addTearDown(song.dispose);
+      final song = ValueNotifier<SongEntity?>(_flac);
+      final codec = ValueNotifier<String?>(null);
+      addTearDown(song.dispose);
+      addTearDown(codec.dispose);
     await tester.pumpWidget(
       MaterialApp(
         home: Scaffold(
@@ -71,7 +88,10 @@ void main() {
             data: const MediaQueryData(textScaler: TextScaler.linear(2)),
             child: SizedBox(
               width: 220,
-              child: PlayerAudioSpec(songListenable: song),
+              child: PlayerAudioSpec(
+                songListenable: song,
+                playbackCodecListenable: codec,
+              ),
             ),
           ),
         ),
