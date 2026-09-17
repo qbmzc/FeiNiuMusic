@@ -52,8 +52,7 @@ class SongDetailSheet extends StatefulWidget {
 }
 
 class _SongDetailSheetState extends State<SongDetailSheet> {
-  final FeiNiuFavoriteService _favoriteService =
-      FeiNiuFavoriteService.instance;
+  final FeiNiuFavoriteService _favoriteService = FeiNiuFavoriteService.instance;
   bool _isFavorite = false;
   bool _loadingFavorite = true;
 
@@ -119,7 +118,10 @@ class _SongDetailSheetState extends State<SongDetailSheet> {
 
   /// 点击解码 tag：弹出二选一解码器选择。选定后切换当前歌曲的解码引擎并关掉
   /// 面板（重载期间避免拖其他控件）。
-  Future<void> _showDecoderPicker(BuildContext context, EngineKind current) async {
+  Future<void> _showDecoderPicker(
+    BuildContext context,
+    EngineKind current,
+  ) async {
     final selected = await showModalBottomSheet<EngineKind>(
       context: context,
       backgroundColor: Colors.transparent,
@@ -140,9 +142,7 @@ class _SongDetailSheetState extends State<SongDetailSheet> {
       context: context,
       backgroundColor: Colors.transparent,
       isScrollControlled: true,
-      builder: (_) => _TranscodeFormatPickerSheet(
-        song: widget.song,
-      ),
+      builder: (_) => _TranscodeFormatPickerSheet(song: widget.song),
     );
     // null = 关闭面板（未选择）
     if (selected == null || !mounted) return;
@@ -229,6 +229,8 @@ class _SongDetailSheetState extends State<SongDetailSheet> {
                       ],
                     ),
                   ),
+                  // 播放页已在标题区提供收藏按钮；从列表等其它入口打开详情时
+                  // 仍保留这里的入口，避免非播放页场景无法收藏。
                   if (!widget.showPlayerControls)
                     IconButton(
                       icon: Icon(
@@ -280,9 +282,7 @@ class _SongDetailSheetState extends State<SongDetailSheet> {
                 final nav = Navigator.of(context);
                 nav.pop(); // 关闭详情 sheet
                 final updated = await nav.push<SongEntity>(
-                  buildAppPageRoute(
-                    (_) => SongEditPage(song: widget.song),
-                  ),
+                  buildAppPageRoute((_) => SongEditPage(song: widget.song)),
                 );
                 if (updated != null) {
                   // 激活回调刷新列表 + 更新当前播放/队列
@@ -291,8 +291,7 @@ class _SongDetailSheetState extends State<SongDetailSheet> {
                 }
               },
             ),
-            if (widget.extraActions != null)
-              ...widget.extraActions!,
+            if (widget.extraActions != null) ...widget.extraActions!,
             if (widget.onOpenPlayerAppearanceSettings != null)
               AppListTile(
                 leading: const Icon(Icons.tune_rounded),
@@ -376,7 +375,8 @@ class _SongDetailSheetState extends State<SongDetailSheet> {
                               engine: engine,
                               // 桌面端只有 media_kit（FFmpeg）引擎，
                               // 禁止手动切到 just_audio（无实现）。
-                              onTap: Platform.isWindows ||
+                              onTap:
+                                  Platform.isWindows ||
                                       Platform.isMacOS ||
                                       Platform.isLinux
                                   ? null
@@ -400,8 +400,11 @@ class _SongDetailSheetState extends State<SongDetailSheet> {
 
   Widget _buildCover(ThemeData theme, SongEntity song) {
     if (song.coverId != null && song.coverId!.isNotEmpty) {
-      final coverUrl =
-          FeiNiuApiClient.instance.coverUrl(song.coverId!, size: FeiNiuApiClient.coverRequestSize, updatedAt: song.updatedAt);
+      final coverUrl = FeiNiuApiClient.instance.coverUrl(
+        song.coverId!,
+        size: FeiNiuApiClient.coverRequestSize,
+        updatedAt: song.updatedAt,
+      );
       return CachedNetworkImage(
         imageUrl: coverUrl,
         httpHeaders: FeiNiuApiClient.imageAuthHeaders(),
@@ -446,9 +449,10 @@ class _AppVolumeControl extends StatelessWidget {
     final colors = Theme.of(context).colorScheme;
     // 与下方 AppListTile 的标题对齐：同用 ListTileTheme 的 contentPadding，
     // leading（图标宽 24）与标题之间留 16（ListTile 默认 horizontalTitleGap）。
-    final tilePadding = ListTileTheme.of(context).contentPadding?.resolve(
-          Directionality.of(context),
-        ) ??
+    final tilePadding =
+        ListTileTheme.of(
+          context,
+        ).contentPadding?.resolve(Directionality.of(context)) ??
         const EdgeInsets.symmetric(horizontal: 16);
     return Padding(
       padding: EdgeInsets.only(
@@ -537,9 +541,10 @@ class _PlaybackSpeedControl extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
     // 与下方 AppListTile 的标题对齐：同用 ListTileTheme 的 contentPadding。
-    final tilePadding = ListTileTheme.of(context).contentPadding?.resolve(
-          Directionality.of(context),
-        ) ??
+    final tilePadding =
+        ListTileTheme.of(
+          context,
+        ).contentPadding?.resolve(Directionality.of(context)) ??
         const EdgeInsets.symmetric(horizontal: 16);
     return Padding(
       padding: EdgeInsets.only(
@@ -775,7 +780,7 @@ class _TranscodeTag extends StatelessWidget {
   }
 }
 
-/// 转码格式四选一选择面板：直连 / FLAC 无损 / MP3 / OPUS。选定后切换当前歌曲
+/// 转码格式三选一选择面板：直连 / OPUS / MP3。选定后切换当前歌曲
 /// 转码格式（直连 = 本歌强制不转码，返回 `_TranscodeChoice.direct`；格式 =
 /// 本歌**强制**按该格式转码，不依赖全局「开启转码」开关）。
 ///
@@ -798,8 +803,8 @@ class _TranscodeFormatPickerSheet extends StatelessWidget {
         : const Color.fromARGB(255, 100, 100, 100);
 
     const labels = {
-      TranscodeFormat.mp3: ('MP3', '高兼容，适合多数设备'),
-      TranscodeFormat.opus: ('OPUS', '更省流量，文件更小'),
+      TranscodeFormat.mp3: ('MP3', '有损转码'),
+      TranscodeFormat.opus: ('OPUS', '有损转码（体积小）'),
     };
     const color = Color(0xFFB08000);
     const directColor = Color(0xFF607D8B);

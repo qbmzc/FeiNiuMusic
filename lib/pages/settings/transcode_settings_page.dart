@@ -92,8 +92,8 @@ class _TranscodeSettingsPageState extends State<TranscodeSettingsPage> {
                                     max: AppTranscodeSettings.maxThresholdMb
                                         .toDouble(),
                                     // 每格 5MB
-                                    divisions: (AppTranscodeSettings
-                                                .maxThresholdMb -
+                                    divisions:
+                                        (AppTranscodeSettings.maxThresholdMb -
                                             AppTranscodeSettings
                                                 .minThresholdMb) ~/
                                         5,
@@ -140,29 +140,20 @@ class _TranscodeSettingsPageState extends State<TranscodeSettingsPage> {
   }
 
   Widget _buildFormatTile(BuildContext context, TranscodeFormat format) {
-    const labels = {
-      TranscodeFormat.mp3: 'MP3',
-      TranscodeFormat.opus: 'OPUS',
-    };
+    const labels = {TranscodeFormat.mp3: 'MP3', TranscodeFormat.opus: 'OPUS'};
     return Padding(
       padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            '转码格式',
-            style: Theme.of(context).textTheme.titleSmall,
-          ),
+          Text('转码格式', style: Theme.of(context).textTheme.titleSmall),
           const SizedBox(height: 10),
           SizedBox(
             width: double.infinity,
             child: SegmentedButton<TranscodeFormat>(
               segments: [
                 for (final f in AppTranscodeSettings.availableFormats)
-                  ButtonSegment(
-                    value: f,
-                    label: Text(labels[f] ?? f.name),
-                  ),
+                  ButtonSegment(value: f, label: Text(labels[f] ?? f.name)),
               ],
               selected: {format},
               showSelectedIcon: false,
@@ -175,8 +166,8 @@ class _TranscodeSettingsPageState extends State<TranscodeSettingsPage> {
           Text(
             '默认使用 OPUS；MP3 作为兼容性备选。无损源文件不转为 FLAC。',
             style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: Theme.of(context).colorScheme.onSurfaceVariant,
-                ),
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+            ),
           ),
         ],
       ),

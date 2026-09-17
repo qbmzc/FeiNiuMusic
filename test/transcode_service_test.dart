@@ -306,7 +306,7 @@ void main() {
       expect(url, isNull);
     });
 
-    test('默认请求 FLAC 转码（无损优先）', () async {
+    test('旧版 FLAC 专用路径仍默认请求 FLAC', () async {
       String? requestedCodec;
       FeiNiuApiClient.instance.setDioForTest(
         _mockDio((o) {

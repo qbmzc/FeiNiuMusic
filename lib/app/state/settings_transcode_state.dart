@@ -37,9 +37,12 @@ class AppTranscodeSettings {
 
   static final ValueNotifier<bool> enabled = ValueNotifier(false);
   static final ValueNotifier<bool> transcodeAll = ValueNotifier(true);
-  static final ValueNotifier<int> thresholdMb = ValueNotifier(defaultThresholdMb);
-  static final ValueNotifier<TranscodeFormat> format =
-      ValueNotifier(TranscodeFormat.opus);
+  static final ValueNotifier<int> thresholdMb = ValueNotifier(
+    defaultThresholdMb,
+  );
+  static final ValueNotifier<TranscodeFormat> format = ValueNotifier(
+    TranscodeFormat.opus,
+  );
   static final ValueNotifier<bool> directOnWifi = ValueNotifier(false);
 
   static Future<void>? _loading;
@@ -50,10 +53,11 @@ class AppTranscodeSettings {
     final prefs = await SharedPreferences.getInstance();
     enabled.value = prefs.getBool(_prefsEnabled) ?? false;
     transcodeAll.value = prefs.getBool(_prefsTranscodeAll) ?? true;
-    thresholdMb.value =
-        (prefs.getInt(_prefsThresholdMb) ?? defaultThresholdMb)
-            .clamp(minThresholdMb, maxThresholdMb);
+    thresholdMb.value = (prefs.getInt(_prefsThresholdMb) ?? defaultThresholdMb)
+        .clamp(minThresholdMb, maxThresholdMb);
     final saved = prefs.getString(_prefsFormat);
+    // 旧版本默认/保存过 FLAC：迁移到 OPUS，避免升级后继续无意义地做
+    // 无损→无损转码；MP3/OPUS 用户选择保持不变。
     format.value = switch (saved) {
       'mp3' => TranscodeFormat.mp3,
       'opus' => TranscodeFormat.opus,

@@ -57,7 +57,10 @@ class PlayerBottomPanel extends StatelessWidget {
           if (showMiniLyrics)
             _MiniLyricsPreview(onTap: onTapLyrics, stylePreset: stylePreset),
           _PlayerSeekBar(player: player, stylePreset: stylePreset),
-          PlayerAudioSpec(songListenable: player.currentSong),
+          PlayerAudioSpec(
+            songListenable: player.currentSong,
+            transcodeCodecListenable: player.activeTranscodeCodec,
+          ),
           SizedBox(height: compact ? 4 : 20),
           PlayerControls(
             player: player,

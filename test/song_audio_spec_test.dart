@@ -93,7 +93,7 @@ void main() {
     );
   });
 
-  test('player text distinguishes direct source from transcoded output', () {
+  test('player format distinguishes direct source from transcoded output', () {
     const song = SongEntity(
       id: 'dsf',
       title: '',
@@ -103,15 +103,15 @@ void main() {
     );
     expect(formatPlayerAudioSpec(song), 'DSF · 5,645 kbps · 直连');
     expect(
-      formatPlayerAudioSpec(song, playbackCodec: 'mp3'),
-      '原始：DSF · 5,645 kbps\n播放：MP3 · 转码',
+      formatPlayerAudioSpec(song, playbackCodec: 'opus'),
+      'DSF · 5,645 kbps → OPUS · 转码',
     );
     expect(
       formatPlayerAudioSpec(
         const SongEntity(id: 'unknown', title: '', artist: ''),
         playbackCodec: 'opus',
       ),
-      '播放：OPUS · 转码',
+      '当前播放：OPUS · 转码',
     );
   });
 }

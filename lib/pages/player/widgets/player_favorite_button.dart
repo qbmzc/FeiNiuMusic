@@ -28,7 +28,9 @@ class _PlayerFavoriteButtonState extends State<PlayerFavoriteButton> {
   @override
   void didUpdateWidget(covariant PlayerFavoriteButton oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.song?.id != widget.song?.id) _loadFavoriteState();
+    if (oldWidget.song?.id != widget.song?.id) {
+      _loadFavoriteState();
+    }
   }
 
   Future<void> _loadFavoriteState() async {

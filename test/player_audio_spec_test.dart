@@ -30,21 +30,27 @@ void main() {
     'specification updates on song changes and hides without metadata',
     (tester) async {
       final song = ValueNotifier<SongEntity?>(_flac);
-      final codec = ValueNotifier<String?>(null);
+      final transcodeCodec = ValueNotifier<String?>(null);
       addTearDown(song.dispose);
-      addTearDown(codec.dispose);
+      addTearDown(transcodeCodec.dispose);
       await tester.pumpWidget(
         MaterialApp(
           home: Scaffold(
             body: PlayerAudioSpec(
               songListenable: song,
-              playbackCodecListenable: codec,
+              transcodeCodecListenable: transcodeCodec,
             ),
           ),
         ),
       );
       expect(find.text(_label), findsOneWidget);
 
+      transcodeCodec.value = 'opus';
+      await tester.pump();
+      expect(find.text('FLAC · 2,850 kbps → OPUS · 转码'), findsOneWidget);
+      expect(find.text(_label), findsNothing);
+
+      transcodeCodec.value = null;
       song.value = const SongEntity(
         id: 'aac',
         title: '',
@@ -53,17 +59,9 @@ void main() {
         bitrate: 256000,
       );
       await tester.pump();
-      expect(find.text(_label), findsNothing);
+      expect(find.text('FLAC · 2,850 kbps → OPUS · 转码'), findsNothing);
       expect(find.text('AAC · 256 kbps · 直连'), findsOneWidget);
 
-      codec.value = 'mp3';
-      await tester.pump();
-      expect(
-        find.text('原始：AAC · 256 kbps\n播放：MP3 · 转码'),
-        findsOneWidget,
-      );
-
-      codec.value = null;
       song.value = const SongEntity(id: 'unknown', title: '', artist: '');
       await tester.pump();
       expect(find.byType(Tooltip), findsNothing);
@@ -77,10 +75,8 @@ void main() {
   testWidgets('narrow width and large text wrap without overflow', (
     tester,
   ) async {
-      final song = ValueNotifier<SongEntity?>(_flac);
-      final codec = ValueNotifier<String?>(null);
-      addTearDown(song.dispose);
-      addTearDown(codec.dispose);
+    final song = ValueNotifier<SongEntity?>(_flac);
+    addTearDown(song.dispose);
     await tester.pumpWidget(
       MaterialApp(
         home: Scaffold(
@@ -88,10 +84,7 @@ void main() {
             data: const MediaQueryData(textScaler: TextScaler.linear(2)),
             child: SizedBox(
               width: 220,
-              child: PlayerAudioSpec(
-                songListenable: song,
-                playbackCodecListenable: codec,
-              ),
+              child: PlayerAudioSpec(songListenable: song),
             ),
           ),
         ),

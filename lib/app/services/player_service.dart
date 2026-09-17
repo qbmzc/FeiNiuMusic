@@ -85,12 +85,8 @@ class PlayerService with WidgetsBindingObserver {
   /// 文件（`StreamCacheService.cacheTranscodedSong`），第二次起零流量。
   String? _activeTranscodeHlsUrl;
   String? _activeTranscodeCodec;
-
-  /// 当前歌曲实际播放的服务器转码格式；null 表示直连原始音源。
-  final ValueNotifier<String?> playbackTranscodeCodec = ValueNotifier(null);
-
-  /// 构建播放源时记录每首歌最终命中的转码格式，激活对应逻辑索引后再发布。
-  final Map<String, String> _resolvedPlaybackCodecs = {};
+  final ValueNotifier<String?> _activeTranscodeCodecNotifier =
+      ValueNotifier(null);
 
   /// 当前引擎 run 在逻辑队列中的起始索引。引擎 currentIndexStream 给的是
   /// 引擎内（run 内）索引，映射回逻辑索引需加该偏移。
@@ -172,6 +168,10 @@ class PlayerService with WidgetsBindingObserver {
       _state.sleepTimerDisplayText;
   ValueNotifier<bool> get sleepUntilSongEnd => _state.sleepUntilSongEnd;
   ValueNotifier<EngineKind> get decoderEngine => _state.decoderEngine;
+
+  /// 当前播放源实际使用的服务器转码格式；未转码时为 null。
+  ValueNotifier<String?> get activeTranscodeCodec =>
+      _activeTranscodeCodecNotifier;
 
   /// 是否正在 DLNA 投屏（遥控模式）。投屏时 UI 据此把播放控制转到投屏设备。
   ValueNotifier<bool> get isCasting => _state.isCasting;
@@ -359,7 +359,7 @@ class PlayerService with WidgetsBindingObserver {
       // 旧 HLS 不再代表当前网络策略，先清掉播放完成后的后台缓存标记并释放会话。
       _activeTranscodeHlsUrl = null;
       _activeTranscodeCodec = null;
-      playbackTranscodeCodec.value = null;
+      _activeTranscodeCodecNotifier.value = null;
       await FeiNiuTranscodeService.instance.quitFor(song.id);
 
       await _activateLogicalIndex(
@@ -707,7 +707,7 @@ class PlayerService with WidgetsBindingObserver {
     }
     _activeTranscodeHlsUrl = null;
     _activeTranscodeCodec = null;
-    playbackTranscodeCodec.value = null;
+    _activeTranscodeCodecNotifier.value = null;
     final list = queue.value;
     final idx = currentIndex.value;
     if (idx < 0 || list.isEmpty) return;
@@ -1123,7 +1123,6 @@ class PlayerService with WidgetsBindingObserver {
     );
     await _applyEngineVolume(target);
     await _applyEngineSpeed(target);
-    playbackTranscodeCodec.value = _resolvedPlaybackCodecs[newId];
   }
 
   /// 按引擎类型返回引擎实例（media_kit 懒创建）。
@@ -1591,6 +1590,7 @@ class PlayerService with WidgetsBindingObserver {
       queue.value = remaining;
       currentIndex.value = remaining.isEmpty ? -1 : 0;
       currentSong.value = remaining.isEmpty ? null : remaining.first;
+      if (remaining.isEmpty) _activeTranscodeCodecNotifier.value = null;
       _emitSnapshot();
       return;
     }
@@ -1735,6 +1735,7 @@ class PlayerService with WidgetsBindingObserver {
     queue.value = const [];
     currentIndex.value = -1;
     currentSong.value = null;
+    _activeTranscodeCodecNotifier.value = null;
     _emitSnapshot(force: true);
     await _clearPersistedPlaybackState();
   }
@@ -3800,6 +3801,7 @@ class PlayerService with WidgetsBindingObserver {
 
   void _applyLogicalQueue(List<SongEntity> songs, int currentQueueIndex) {
     queue.value = songs;
+    _activeTranscodeCodecNotifier.value = null;
     if (songs.isEmpty) {
       currentIndex.value = -1;
       currentSong.value = null;
@@ -3826,7 +3828,7 @@ class PlayerService with WidgetsBindingObserver {
       final song = list[idx];
       final previousSongId = currentSong.value?.id;
       final songChanged = previousSongId != song.id;
-      if (songChanged) playbackTranscodeCodec.value = null;
+      if (songChanged) _activeTranscodeCodecNotifier.value = null;
       currentSong.value = song;
       StreamCacheService.instance.currentSongId = song.id;
       if (songChanged) {
@@ -4033,7 +4035,6 @@ class PlayerService with WidgetsBindingObserver {
     SongEntity song, {
     bool forceRefresh = false,
   }) async {
-    _resolvedPlaybackCodecs.remove(song.id);
     final api = FeiNiuApiClient.instance;
     if (api.baseUrl.isNotEmpty) {
       // 播放出错重试时删除损坏/过期的缓存，强制走远端
@@ -4123,29 +4124,26 @@ class PlayerService with WidgetsBindingObserver {
       codec,
     );
     if (cached != null) {
+      if (currentSong.value?.id == song.id) {
+        _activeTranscodeCodecNotifier.value = codec.toUpperCase();
+      }
       if (kDebugMode) {
         debugPrint(
           '[PlayerService] transcode ${song.title} -> LOCAL ${cached.path}',
         );
       }
-      _resolvedPlaybackCodecs[song.id] = codec;
-      if (currentSong.value?.id == song.id) {
-        playbackTranscodeCodec.value = codec;
-      }
       return AudioSource.file(cached.path);
     }
 
     // 2) 需要转码判定：不转 → 直接直连（不标记，正常回落）。
-    if (!await svc.shouldTranscode(song)) {
-      if (currentSong.value?.id == song.id) {
-        playbackTranscodeCodec.value = null;
-      }
-      return null;
-    }
+    if (!await svc.shouldTranscode(song)) return null;
 
     // 3) 在线 HLS。
     final hlsUrl = await svc.transcodeHlsUrlFor(song);
     if (hlsUrl == null) {
+      if (currentSong.value?.id == song.id) {
+        _activeTranscodeCodecNotifier.value = null;
+      }
       // 需要转码但转码请求失败 → 标记失败，本会话不再重试转码（回落
       // routeForSong：DSF→mediaKit 直连，普通→just_audio 直连）。
       _transcodeFailedSongIds.add(song.id);
@@ -4161,9 +4159,8 @@ class PlayerService with WidgetsBindingObserver {
     // 不在构建源时立即下载，避免首次播放双倍带宽。
     _activeTranscodeHlsUrl = hlsUrl;
     _activeTranscodeCodec = codec;
-    _resolvedPlaybackCodecs[song.id] = codec;
     if (currentSong.value?.id == song.id) {
-      playbackTranscodeCodec.value = codec;
+      _activeTranscodeCodecNotifier.value = codec.toUpperCase();
     }
     return AudioSource.uri(
       Uri.parse(hlsUrl),
