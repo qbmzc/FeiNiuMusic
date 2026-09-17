@@ -1,4 +1,4 @@
-name: build-release
+name: build-preview
 
 on:
   push:
@@ -44,7 +44,8 @@ jobs:
         run: |
           $line = Select-String -Path pubspec.yaml -Pattern '^version:\s*(.+)$' | Select-Object -First 1
           $full = $line.Matches[0].Groups[1].Value.Trim()
-          $ver = $full.Split('+')[0]
+          $base = $full.Split('+')[0]
+          $ver = "$base-preview.$env:GITHUB_RUN_NUMBER"
           echo "VERSION=$ver" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
       - name: 构建并打包 Windows 绿色版
         shell: powershell
@@ -52,7 +53,8 @@ jobs:
       - name: 拷贝 zip 到工作区根目录（避免 upload-artifact 保留目录前缀）
         shell: powershell
         run: |
-          Copy-Item -Path build/installer/FeiNiuMusic-v*-Windows.zip -Destination . -Force
+          $source = Get-ChildItem -Path build/installer/FeiNiuMusic-v*-Windows.zip | Select-Object -First 1
+          Copy-Item -Path $source.FullName -Destination "FeiNiuMusic-v$env:VERSION-Windows.zip" -Force
       - name: 上传 Windows 产物
         uses: actions/upload-artifact@v4
         with:
@@ -96,7 +98,8 @@ jobs:
       - run: flutter precache --android
       - run: |
           FULL_VERSION=$(grep '^version:' pubspec.yaml | awk '{print $2}')
-          VERSION=${FULL_VERSION%%+*}
+          BASE_VERSION=${FULL_VERSION%%+*}
+          VERSION="${BASE_VERSION}-preview.${GITHUB_RUN_NUMBER}"
           echo "VERSION=$VERSION" >> $GITHUB_ENV
       # 1) 正式包：默认包名 com.feiniu.music，三个 CPU 架构全部保留
       - run: flutter build apk --release --split-per-abi
@@ -181,7 +184,8 @@ jobs:
         shell: bash
         run: |
           FULL_VERSION=$(grep '^version:' pubspec.yaml | awk '{print $2}')
-          VERSION=${FULL_VERSION%%+*}
+          BASE_VERSION=${FULL_VERSION%%+*}
+          VERSION="${BASE_VERSION}-preview.${GITHUB_RUN_NUMBER}"
           echo "VERSION=$VERSION" >> $GITHUB_ENV
       - name: 构建并打包 macOS（dmg + zip）
         shell: bash
@@ -230,7 +234,8 @@ jobs:
         shell: bash
         run: |
           FULL_VERSION=$(grep '^version:' pubspec.yaml | awk '{print $2}')
-          VERSION=${FULL_VERSION%%+*}
+          BASE_VERSION=${FULL_VERSION%%+*}
+          VERSION="${BASE_VERSION}-preview.${GITHUB_RUN_NUMBER}"
           echo "VERSION=$VERSION" >> $GITHUB_ENV
       - name: 构建未签名 iOS 应用（.ipa 供自行签名）
         shell: bash
@@ -261,7 +266,8 @@ jobs:
       - name: 提取版本号
         run: |
           FULL_VERSION=$(grep '^version:' pubspec.yaml | awk '{print $2}')
-          VERSION=${FULL_VERSION%%+*}
+          BASE_VERSION=${FULL_VERSION%%+*}
+          VERSION="${BASE_VERSION}-preview.${GITHUB_RUN_NUMBER}"
           echo "VERSION=$VERSION" >> $GITHUB_ENV
       - name: 生成 release 说明
         run: |
@@ -272,6 +278,11 @@ jobs:
       - name: 追加平台使用说明
         run: |
           cat >> release_notes.txt <<'EOF'
+
+          ---
+          **预览版本声明**
+          - 本 Release 来自 FeiNiuMusic 下游项目仓库，仅供预览测试，尚未合并到上游仓库。
+          - 版本号中的 `-preview.<Actions Run Number>` 用于区分每次下游构建。
 
           ---
           **安装说明**
@@ -303,7 +314,9 @@ jobs:
       - uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ env.VERSION }}
-          name: v${{ env.VERSION }}
+          name: FeiNiuMusic v${{ env.VERSION }}（预览版）
+          prerelease: true
+          make_latest: false
           body_path: release_notes.txt
           files: |
             android-artifact/FeiNiuMusic-v*.apk

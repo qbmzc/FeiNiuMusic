@@ -36,11 +36,17 @@ void main() {
     final rect = tester.getRect(find.byType(PlayerLyricsView));
     // 歌词块应从布局顶部开始（仅留外层布局 Padding 8px），
     // 而不是被外层重复 header 推到 93px 处。
-    expect(rect.top, lessThan(30),
-        reason: '歌词块顶部不应有重复 header 留白，实际 top=${rect.top}');
+    expect(
+      rect.top,
+      lessThan(30),
+      reason: '歌词块顶部不应有重复 header 留白，实际 top=${rect.top}',
+    );
     // 歌词块应铺满到接近底部
-    expect(rect.height, greaterThan(700),
-        reason: '歌词块应铺满整列高度，实际 height=${rect.height}');
+    expect(
+      rect.height,
+      greaterThan(700),
+      reason: '歌词块应铺满整列高度，实际 height=${rect.height}',
+    );
   });
 
   testWidgets('手机竖屏：仍渲染外层 header（非平板不隐藏）', (tester) async {
@@ -58,9 +64,13 @@ void main() {
     // 外层 header 仍渲染（非平板不隐藏），布局不崩溃。
     expect(tester.takeException(), isNull);
     expect(find.byType(PlayerLyricsView), findsNothing);
+    expect(
+      find.byKey(const ValueKey('player-favorite-button')),
+      findsOneWidget,
+    );
   });
 
-  testWidgets('手机横屏：使用紧凑双栏布局且不溢出', (tester) async {
+  testWidgets('手机横屏：封面与完整歌词共用横屏布局且不溢出', (tester) async {
     tester.view.physicalSize = const Size(844, 390);
     tester.view.devicePixelRatio = 1.0;
     addTearDown(tester.view.reset);
@@ -71,10 +81,14 @@ void main() {
     await tester.pump();
 
     expect(
-      find.byKey(const ValueKey('compact-landscape-player-layout')),
+      find.byKey(const ValueKey('landscape-player-layout')),
       findsOneWidget,
     );
-    expect(find.byType(PlayerLyricsView), findsNothing);
+    expect(find.byType(PlayerLyricsView), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('player-favorite-button')),
+      findsOneWidget,
+    );
     expect(tester.takeException(), isNull);
   });
 }

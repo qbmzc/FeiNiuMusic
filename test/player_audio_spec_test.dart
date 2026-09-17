@@ -30,14 +30,27 @@ void main() {
     'specification updates on song changes and hides without metadata',
     (tester) async {
       final song = ValueNotifier<SongEntity?>(_flac);
+      final transcodeCodec = ValueNotifier<String?>(null);
       addTearDown(song.dispose);
+      addTearDown(transcodeCodec.dispose);
       await tester.pumpWidget(
         MaterialApp(
-          home: Scaffold(body: PlayerAudioSpec(songListenable: song)),
+          home: Scaffold(
+            body: PlayerAudioSpec(
+              songListenable: song,
+              transcodeCodecListenable: transcodeCodec,
+            ),
+          ),
         ),
       );
       expect(find.text(_label), findsOneWidget);
 
+      transcodeCodec.value = 'opus';
+      await tester.pump();
+      expect(find.text('OPUS · 转码'), findsOneWidget);
+      expect(find.text(_label), findsNothing);
+
+      transcodeCodec.value = null;
       song.value = const SongEntity(
         id: 'aac',
         title: '',
@@ -46,7 +59,7 @@ void main() {
         bitrate: 256000,
       );
       await tester.pump();
-      expect(find.text(_label), findsNothing);
+      expect(find.text('OPUS · 转码'), findsNothing);
       expect(find.text('AAC · 256 kbps'), findsOneWidget);
 
       song.value = const SongEntity(id: 'unknown', title: '', artist: '');
