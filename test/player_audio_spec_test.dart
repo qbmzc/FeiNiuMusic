@@ -47,7 +47,7 @@ void main() {
 
       transcodeCodec.value = 'opus';
       await tester.pump();
-      expect(find.text('OPUS · 转码'), findsOneWidget);
+      expect(find.text('FLAC · 2,850 kbps → OPUS · 转码'), findsOneWidget);
       expect(find.text(_label), findsNothing);
 
       transcodeCodec.value = null;
@@ -59,7 +59,7 @@ void main() {
         bitrate: 256000,
       );
       await tester.pump();
-      expect(find.text('OPUS · 转码'), findsNothing);
+      expect(find.text('FLAC · 2,850 kbps → OPUS · 转码'), findsNothing);
       expect(find.text('AAC · 256 kbps'), findsOneWidget);
 
       song.value = const SongEntity(id: 'unknown', title: '', artist: '');

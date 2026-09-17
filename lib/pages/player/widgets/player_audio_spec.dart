@@ -40,20 +40,28 @@ class PlayerAudioSpec extends StatelessWidget {
     String? transcodeCodec,
   ) {
     final codec = transcodeCodec?.trim();
-    final text = codec == null || codec.isEmpty
-        ? formatSongAudioSpec(song)
+    final sourceText = formatSongAudioSpec(song);
+    final transcodedText = codec == null || codec.isEmpty
+        ? null
         : '${codec.toUpperCase()} · 转码';
+    final text = transcodedText == null
+        ? sourceText
+        : sourceText.isEmpty
+        ? transcodedText
+        : '$sourceText → $transcodedText';
     if (text.isEmpty) return const SizedBox.shrink();
-    final isTranscoded = codec != null && codec.isNotEmpty;
+    final isTranscoded = transcodedText != null;
     return Padding(
       padding: const EdgeInsets.fromLTRB(20, 4, 20, 0),
       child: Tooltip(
-        message: isTranscoded ? '当前播放规格（服务器转码）' : '音源规格（原始文件）',
+        message: isTranscoded ? '原始音源规格 → 当前播放规格（服务器转码）' : '音源规格（原始文件）',
         child: Text(
           text,
           textAlign: TextAlign.center,
           style: TextStyle(fontSize: 11, color: color),
-          semanticsLabel: isTranscoded ? '当前播放规格：$text' : '音源规格：$text',
+          semanticsLabel: isTranscoded
+              ? '原始音源规格：$sourceText；当前播放规格：$transcodedText'
+              : '音源规格：$text',
         ),
       ),
     );
