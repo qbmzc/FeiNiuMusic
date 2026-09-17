@@ -229,15 +229,16 @@ class _SongDetailSheetState extends State<SongDetailSheet> {
                       ],
                     ),
                   ),
-                  IconButton(
-                    icon: Icon(
-                      _isFavorite
-                          ? Icons.favorite_rounded
-                          : Icons.favorite_border_rounded,
-                      color: _isFavorite ? theme.colorScheme.error : null,
+                  if (!widget.showPlayerControls)
+                    IconButton(
+                      icon: Icon(
+                        _isFavorite
+                            ? Icons.favorite_rounded
+                            : Icons.favorite_border_rounded,
+                        color: _isFavorite ? theme.colorScheme.error : null,
+                      ),
+                      onPressed: _loadingFavorite ? null : _toggleFavorite,
                     ),
-                    onPressed: _loadingFavorite ? null : _toggleFavorite,
-                  ),
                 ],
               ),
             ),

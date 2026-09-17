@@ -21,6 +21,7 @@ import 'lyrics/lyric_view.dart';
 import 'widgets/player_audio_spec.dart';
 import 'widgets/player_background.dart';
 import 'widgets/player_bottom_panel.dart';
+import 'widgets/player_favorite_button.dart';
 import 'widgets/player_header.dart';
 import 'tv_player_focus_scope.dart';
 
@@ -971,7 +972,7 @@ class _PosterMetaRow extends StatelessWidget {
     final scheme = Theme.of(context).colorScheme;
     return Row(
       children: [
-        _PosterFavoriteButton(song: song),
+        PlayerFavoriteButton(song: song),
         const Spacer(),
         IconButton(
           visualDensity: const VisualDensity(horizontal: -4, vertical: -4),
