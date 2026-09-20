@@ -454,38 +454,51 @@ class _LandscapePlayerLayout extends StatelessWidget {
         children: [
           Expanded(
             flex: 5,
-            child: Column(
-              children: [
-                Flexible(
-                  flex: compact ? 7 : 8,
-                  child: Center(
-                    child: _PlayerArtwork(
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                // 手机横屏可用高度只有 ~390，控制区（进度条 + 播放按钮 + 底部
+                // 功能按钮）内容高度约 190，如果和封面按比例分空间（原 7:4），
+                // 控制区只能拿到 ~100 被挤到屏幕外，按钮看不见也点不到。
+                // 这里让控制区按内容高度优先布局（上限 62% 高度，超出时内部
+                // 滚动兜底），封面只吃剩余空间并按可用高度收缩。
+                final panelMaxHeight =
+                    (constraints.maxHeight * 0.62).clamp(
+                      120.0,
+                      constraints.maxHeight,
+                    );
+                return Column(
+                  children: [
+                    Expanded(
+                      child: Center(
+                        child: _PlayerArtwork(
+                          songSignal: player.currentSongSignal,
+                          stylePreset: stylePreset,
+                        ),
+                      ),
+                    ),
+                    SizedBox(height: compact ? 4 : 12),
+                    PlayerHeader(
                       songSignal: player.currentSongSignal,
                       stylePreset: stylePreset,
                     ),
-                  ),
-                ),
-                SizedBox(height: compact ? 4 : 12),
-                PlayerHeader(
-                  songSignal: player.currentSongSignal,
-                  stylePreset: stylePreset,
-                ),
-                Flexible(
-                  flex: compact ? 4 : 5,
-                  child: SingleChildScrollView(
-                    child: PlayerBottomPanel(
-                      player: player,
-                      stylePreset: stylePreset,
-                      // 横屏右侧已经显示完整歌词，不再在左栏重复显示
-                      // 迷你歌词预览。
-                      onTapLyrics: () {},
-                      showMiniLyrics: false,
-                      compact: compact,
-                      bottomPanelFocus: bottomPanelFocus,
+                    ConstrainedBox(
+                      constraints: BoxConstraints(maxHeight: panelMaxHeight),
+                      child: SingleChildScrollView(
+                        child: PlayerBottomPanel(
+                          player: player,
+                          stylePreset: stylePreset,
+                          // 横屏右侧已经显示完整歌词，不再在左栏重复显示
+                          // 迷你歌词预览。
+                          onTapLyrics: () {},
+                          showMiniLyrics: false,
+                          compact: compact,
+                          bottomPanelFocus: bottomPanelFocus,
+                        ),
+                      ),
                     ),
-                  ),
-                ),
-              ],
+                  ],
+                );
+              },
             ),
           ),
           SizedBox(width: gap),

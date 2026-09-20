@@ -109,4 +109,46 @@ void main() {
     expect(find.byType(PlayerLyricsView), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
+
+  testWidgets('手机横屏：播放控制按钮完整落在屏幕内', (tester) async {
+    tester.view.physicalSize = const Size(844, 390);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+
+    await tester.pumpWidget(const MaterialApp(home: PlayerPage()));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    await tester.pump();
+
+    const screenHeight = 390.0;
+    for (final icon in <IconData>[
+      Icons.skip_previous_rounded,
+      Icons.play_arrow_rounded,
+      Icons.skip_next_rounded,
+    ]) {
+      final finder = find.byIcon(icon);
+      expect(finder, findsOneWidget, reason: '缺少控制按钮 $icon');
+      final rect = tester.getRect(finder);
+      expect(
+        rect.bottom,
+        lessThanOrEqualTo(screenHeight),
+        reason: '$icon 底部超出屏幕：${rect.bottom} > $screenHeight',
+      );
+    }
+
+    // 底部功能按钮（队列/更多）同样要落在屏幕内。
+    for (final icon in <IconData>[
+      Icons.format_list_bulleted,
+      Icons.more_horiz,
+    ]) {
+      final finder = find.byIcon(icon);
+      if (finder.evaluate().isEmpty) continue;
+      final rect = tester.getRect(finder);
+      expect(
+        rect.bottom,
+        lessThanOrEqualTo(screenHeight),
+        reason: '$icon 底部超出屏幕：${rect.bottom} > $screenHeight',
+      );
+    }
+  });
 }
