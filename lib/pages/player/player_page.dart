@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'dart:ui' as ui;
 
@@ -427,7 +428,12 @@ class _MobilePlayerLayout extends StatelessWidget {
   }
 }
 
-class _LandscapePlayerLayout extends StatelessWidget {
+/// 横屏播放页布局。
+///
+/// 高屏（平板/桌面横屏）沿用「封面 + 标题 + 控制区」纵向排布，全部常驻可见；
+/// 矮屏（手机横屏，可用高度不到 400）改为封面铺满整列、控制区做底部浮层，
+/// 否则封面会被控制区挤到只剩 ~100，自转封面看起来很小很违和。
+class _LandscapePlayerLayout extends StatefulWidget {
   final PlayerService player;
   final PlayerStylePreset stylePreset;
   final FocusNode? bottomPanelFocus;
@@ -439,9 +445,58 @@ class _LandscapePlayerLayout extends StatelessWidget {
   });
 
   @override
+  State<_LandscapePlayerLayout> createState() => _LandscapePlayerLayoutState();
+}
+
+class _LandscapePlayerLayoutState extends State<_LandscapePlayerLayout> {
+  /// 矮屏阈值：手机横屏（844×390 等）可用高度不到 400，平板/桌面横屏通常 ≥ 600。
+  static const double shortHeightThreshold = 500;
+
+  /// 播放中控制浮层静置多久后自动隐藏。
+  static const Duration autoHideDelay = Duration(seconds: 4);
+
+  /// 矮屏下控制浮层是否显示：点击封面区域切换，播放中静置后自动隐藏。
+  bool _controlsVisible = true;
+  Timer? _hideTimer;
+
+  @override
+  void initState() {
+    super.initState();
+    // 播放状态变化时重新计时：开始播放 → 起计时；暂停 → 取消，浮层常驻。
+    widget.player.isPlaying.addListener(_scheduleAutoHide);
+    _scheduleAutoHide();
+  }
+
+  @override
+  void dispose() {
+    widget.player.isPlaying.removeListener(_scheduleAutoHide);
+    _hideTimer?.cancel();
+    super.dispose();
+  }
+
+  void _scheduleAutoHide() {
+    _hideTimer?.cancel();
+    // 暂停/缓冲时保持常驻，否则想继续播放还得先点一下屏幕。
+    if (!widget.player.isPlaying.value) return;
+    _hideTimer = Timer(autoHideDelay, () {
+      if (!mounted) return;
+      setState(() => _controlsVisible = false);
+    });
+  }
+
+  void _toggleControls() {
+    setState(() => _controlsVisible = !_controlsVisible);
+    if (_controlsVisible) {
+      _scheduleAutoHide();
+    } else {
+      _hideTimer?.cancel();
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final width = MediaQuery.sizeOf(context).width;
-    final compact = width < 900;
+    final size = MediaQuery.sizeOf(context);
+    final compact = size.width < 900;
     final horizontalPadding = compact ? 12.0 : 24.0;
     final gap = compact ? 12.0 : 24.0;
     const lyricRadius = 24.0;
@@ -454,52 +509,9 @@ class _LandscapePlayerLayout extends StatelessWidget {
         children: [
           Expanded(
             flex: 5,
-            child: LayoutBuilder(
-              builder: (context, constraints) {
-                // 手机横屏可用高度只有 ~390，控制区（进度条 + 播放按钮 + 底部
-                // 功能按钮）内容高度约 190，如果和封面按比例分空间（原 7:4），
-                // 控制区只能拿到 ~100 被挤到屏幕外，按钮看不见也点不到。
-                // 这里让控制区按内容高度优先布局（上限 62% 高度，超出时内部
-                // 滚动兜底），封面只吃剩余空间并按可用高度收缩。
-                final panelMaxHeight =
-                    (constraints.maxHeight * 0.62).clamp(
-                      120.0,
-                      constraints.maxHeight,
-                    );
-                return Column(
-                  children: [
-                    Expanded(
-                      child: Center(
-                        child: _PlayerArtwork(
-                          songSignal: player.currentSongSignal,
-                          stylePreset: stylePreset,
-                        ),
-                      ),
-                    ),
-                    SizedBox(height: compact ? 4 : 12),
-                    PlayerHeader(
-                      songSignal: player.currentSongSignal,
-                      stylePreset: stylePreset,
-                    ),
-                    ConstrainedBox(
-                      constraints: BoxConstraints(maxHeight: panelMaxHeight),
-                      child: SingleChildScrollView(
-                        child: PlayerBottomPanel(
-                          player: player,
-                          stylePreset: stylePreset,
-                          // 横屏右侧已经显示完整歌词，不再在左栏重复显示
-                          // 迷你歌词预览。
-                          onTapLyrics: () {},
-                          showMiniLyrics: false,
-                          compact: compact,
-                          bottomPanelFocus: bottomPanelFocus,
-                        ),
-                      ),
-                    ),
-                  ],
-                );
-              },
-            ),
+            child: size.height < shortHeightThreshold
+                ? _buildOverlayColumn(context, compact: compact)
+                : _buildStackedColumn(compact: compact),
           ),
           SizedBox(width: gap),
           Expanded(
@@ -516,6 +528,111 @@ class _LandscapePlayerLayout extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+
+  Widget _artwork() {
+    return _PlayerArtwork(
+      key: const ValueKey('landscape-player-artwork'),
+      songSignal: widget.player.currentSongSignal,
+      stylePreset: widget.stylePreset,
+    );
+  }
+
+  Widget _bottomPanel({required bool compact}) {
+    return PlayerBottomPanel(
+      player: widget.player,
+      stylePreset: widget.stylePreset,
+      // 横屏右侧已经显示完整歌词，不再在左栏重复显示迷你歌词预览。
+      onTapLyrics: () {},
+      showMiniLyrics: false,
+      compact: compact,
+      bottomPanelFocus: widget.bottomPanelFocus,
+    );
+  }
+
+  /// 高屏：纵向排布。控制区按内容高度优先布局（上限 62% 高度，超出时内部
+  /// 滚动兜底），封面只吃剩余空间并按可用高度收缩。
+  Widget _buildStackedColumn({required bool compact}) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final panelMaxHeight = (constraints.maxHeight * 0.62).clamp(
+          120.0,
+          constraints.maxHeight,
+        );
+        return Column(
+          children: [
+            Expanded(child: Center(child: _artwork())),
+            SizedBox(height: compact ? 4 : 12),
+            PlayerHeader(
+              songSignal: widget.player.currentSongSignal,
+              stylePreset: widget.stylePreset,
+            ),
+            ConstrainedBox(
+              constraints: BoxConstraints(maxHeight: panelMaxHeight),
+              child: SingleChildScrollView(
+                child: _bottomPanel(compact: compact),
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  /// 矮屏（手机横屏）：封面占满整列，控制区浮在底部，点击封面区域显隐。
+  Widget _buildOverlayColumn(BuildContext context, {required bool compact}) {
+    return Column(
+      children: [
+        PlayerHeader(
+          songSignal: widget.player.currentSongSignal,
+          stylePreset: widget.stylePreset,
+        ),
+        Expanded(
+          child: Stack(
+            children: [
+              Positioned.fill(
+                child: GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: _toggleControls,
+                  child: Center(child: _artwork()),
+                ),
+              ),
+              Positioned(
+                left: 0,
+                right: 0,
+                bottom: 0,
+                child: IgnorePointer(
+                  ignoring: !_controlsVisible,
+                  child: AnimatedOpacity(
+                    opacity: _controlsVisible ? 1 : 0,
+                    duration: const Duration(milliseconds: 180),
+                    child: Listener(
+                      // 操作浮层时重新计时，避免拖进度条拖到一半浮层消失。
+                      onPointerDown: (_) => _scheduleAutoHide(),
+                      onPointerUp: (_) => _scheduleAutoHide(),
+                      child: DecoratedBox(
+                        // 控制浮层压在封面/背景上，补一层渐变遮罩保证按钮可读。
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            begin: Alignment.topCenter,
+                            end: Alignment.bottomCenter,
+                            colors: [
+                              Colors.transparent,
+                              Colors.black.withValues(alpha: 0.55),
+                            ],
+                          ),
+                        ),
+                        child: _bottomPanel(compact: compact),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
     );
   }
 }
@@ -1049,7 +1166,11 @@ class _PlayerArtwork extends StatelessWidget {
   final Signal<SongEntity?> songSignal;
   final PlayerStylePreset stylePreset;
 
-  const _PlayerArtwork({required this.songSignal, required this.stylePreset});
+  const _PlayerArtwork({
+    super.key,
+    required this.songSignal,
+    required this.stylePreset,
+  });
 
   @override
   Widget build(BuildContext context) {

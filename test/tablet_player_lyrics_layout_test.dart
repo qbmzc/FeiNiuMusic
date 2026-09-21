@@ -2,9 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'package:feiniu_music/app/services/player_service.dart';
 import 'package:feiniu_music/app/state/settings_layout_state.dart';
 import 'package:feiniu_music/pages/player/player_page.dart';
 import 'package:feiniu_music/pages/player/lyrics/lyric_view.dart';
+import 'package:feiniu_music/pages/player/widgets/player_bottom_panel.dart';
 
 /// 平板横屏播放页布局回归测试。
 ///
@@ -151,4 +153,111 @@ void main() {
       );
     }
   });
+
+  testWidgets('手机横屏：封面铺满整列（不再被控制区挤小）', (tester) async {
+    tester.view.physicalSize = const Size(844, 390);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+
+    await tester.pumpWidget(const MaterialApp(home: PlayerPage()));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    await tester.pump();
+
+    final artwork = find.byKey(const ValueKey('landscape-player-artwork'));
+    expect(artwork, findsOneWidget);
+    final box = tester.getSize(artwork);
+    // _PlayerArtwork 自身铺满可用空间，内部正方形封面取短边。
+    final disc = box.height < box.width ? box.height : box.width;
+    // 修复前控制区优先后封面只剩 ~104；现在应接近可用高度（~290）。
+    expect(
+      disc,
+      greaterThan(200),
+      reason: '横屏封面过小：外框 ${box.width}×${box.height}',
+    );
+  });
+
+  testWidgets('手机横屏：点击封面切换控制浮层显隐', (tester) async {
+    tester.view.physicalSize = const Size(844, 390);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+    addTearDown(() => PlayerService.instance.isPlaying.value = false);
+
+    await tester.pumpWidget(const MaterialApp(home: PlayerPage()));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    await tester.pump();
+
+    // 进入时控制浮层可见（用户不需要先盲点一下才能操作）。
+    expect(_panelOpacity(tester), 1.0);
+
+    await _tapArtworkTop(tester);
+    expect(_panelOpacity(tester), 0.0, reason: '点击封面后控制浮层应隐藏');
+
+    await _tapArtworkTop(tester);
+    expect(_panelOpacity(tester), 1.0, reason: '再次点击应重新显示控制浮层');
+  });
+
+  testWidgets('手机横屏：播放中静置后浮层自动隐藏，暂停时保持常驻', (tester) async {
+    tester.view.physicalSize = const Size(844, 390);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+    addTearDown(() => PlayerService.instance.isPlaying.value = false);
+
+    await tester.pumpWidget(const MaterialApp(home: PlayerPage()));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    await tester.pump();
+    expect(_panelOpacity(tester), 1.0);
+
+    PlayerService.instance.isPlaying.value = true;
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 5));
+    expect(_panelOpacity(tester), 0.0, reason: '播放中静置后浮层应自动隐藏');
+
+    PlayerService.instance.isPlaying.value = false;
+    await _tapArtworkTop(tester);
+    expect(_panelOpacity(tester), 1.0);
+
+    await tester.pump(const Duration(seconds: 6));
+    expect(_panelOpacity(tester), 1.0, reason: '暂停时浮层不应自动隐藏');
+  });
+
+  testWidgets('平板横屏：封面同样完整可见（沿用常驻布局）', (tester) async {
+    tester.view.physicalSize = const Size(1280, 800);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+    AppLayoutSettings.tabletMode.value = true;
+
+    await tester.pumpWidget(const MaterialApp(home: PlayerPage()));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    await tester.pump();
+
+    final box = tester.getSize(
+      find.byKey(const ValueKey('landscape-player-artwork')),
+    );
+    final disc = box.height < box.width ? box.height : box.width;
+    expect(disc, greaterThan(300), reason: '平板横屏封面应保持大尺寸');
+  });
+}
+
+/// 控制浮层（AnimatedOpacity）当前是否可见。
+double _panelOpacity(WidgetTester tester) {
+  final finder = find.ancestor(
+    of: find.byType(PlayerControls),
+    matching: find.byType(AnimatedOpacity),
+  );
+  expect(finder, findsWidgets, reason: '未找到控制浮层');
+  return tester.widget<AnimatedOpacity>(finder.first).opacity;
+}
+
+/// 点击封面顶部区域（浮层可见时它压在封面下半部分，点中间会落在浮层上）。
+Future<void> _tapArtworkTop(WidgetTester tester) async {
+  final rect = tester.getRect(
+    find.byKey(const ValueKey('landscape-player-artwork')),
+  );
+  await tester.tapAt(Offset(rect.center.dx, rect.top + 20));
+  await tester.pump();
+  await tester.pump(const Duration(milliseconds: 250));
 }
