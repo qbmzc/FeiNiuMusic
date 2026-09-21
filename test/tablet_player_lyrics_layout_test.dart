@@ -7,6 +7,7 @@ import 'package:feiniu_music/app/state/settings_layout_state.dart';
 import 'package:feiniu_music/pages/player/player_page.dart';
 import 'package:feiniu_music/pages/player/lyrics/lyric_view.dart';
 import 'package:feiniu_music/pages/player/widgets/player_bottom_panel.dart';
+import 'package:feiniu_music/pages/player/widgets/player_header.dart';
 
 /// 平板横屏播放页布局回归测试。
 ///
@@ -89,7 +90,8 @@ void main() {
     expect(find.byType(PlayerLyricsView), findsOneWidget);
     expect(
       find.byKey(const ValueKey('player-favorite-button')),
-      findsOneWidget,
+      findsNothing,
+      reason: '矮屏横屏已隐藏左栏标题，标题内的收藏按钮不应单独残留',
     );
     expect(tester.takeException(), isNull);
   });
@@ -174,6 +176,30 @@ void main() {
       disc,
       greaterThan(200),
       reason: '横屏封面过小：外框 ${box.width}×${box.height}',
+    );
+  });
+
+  testWidgets('手机横屏：隐藏左栏标题并让旋转封面相对整列垂直居中', (tester) async {
+    tester.view.physicalSize = const Size(844, 390);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+
+    await tester.pumpWidget(const MaterialApp(home: PlayerPage()));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    await tester.pump();
+
+    expect(find.byType(PlayerHeader), findsNothing);
+    final layoutRect = tester.getRect(
+      find.byKey(const ValueKey('landscape-player-layout')),
+    );
+    final artworkAreaRect = tester.getRect(
+      find.byKey(const ValueKey('short-landscape-artwork-area')),
+    );
+    expect(
+      artworkAreaRect.center.dy,
+      closeTo(layoutRect.center.dy, 0.1),
+      reason: '封面区域应以横屏左栏整列为中心，不再被顶部标题向下推',
     );
   });
 

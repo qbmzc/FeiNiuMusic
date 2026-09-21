@@ -431,8 +431,8 @@ class _MobilePlayerLayout extends StatelessWidget {
 /// 横屏播放页布局。
 ///
 /// 高屏（平板/桌面横屏）沿用「封面 + 标题 + 控制区」纵向排布，全部常驻可见；
-/// 矮屏（手机横屏，可用高度不到 400）改为封面铺满整列、控制区做底部浮层，
-/// 否则封面会被控制区挤到只剩 ~100，自转封面看起来很小很违和。
+/// 矮屏（手机横屏，可用高度不到 500）隐藏左栏标题，让封面相对整列居中，
+/// 控制区做底部浮层；否则标题和控制区会把自转封面挤小并推向下方。
 class _LandscapePlayerLayout extends StatefulWidget {
   final PlayerService player;
   final PlayerStylePreset stylePreset;
@@ -580,56 +580,48 @@ class _LandscapePlayerLayoutState extends State<_LandscapePlayerLayout> {
     );
   }
 
-  /// 矮屏（手机横屏）：封面占满整列，控制区浮在底部，点击封面区域显隐。
+  /// 矮屏（手机横屏）：隐藏标题，封面相对整列居中；控制区浮在底部，
+  /// 点击封面区域显隐。歌曲标题在右侧歌词区已有上下文，不在狭窄左栏重复。
   Widget _buildOverlayColumn(BuildContext context, {required bool compact}) {
-    return Column(
+    return Stack(
+      key: const ValueKey('short-landscape-artwork-area'),
       children: [
-        PlayerHeader(
-          songSignal: widget.player.currentSongSignal,
-          stylePreset: widget.stylePreset,
+        Positioned.fill(
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: _toggleControls,
+            child: Center(child: _artwork()),
+          ),
         ),
-        Expanded(
-          child: Stack(
-            children: [
-              Positioned.fill(
-                child: GestureDetector(
-                  behavior: HitTestBehavior.opaque,
-                  onTap: _toggleControls,
-                  child: Center(child: _artwork()),
-                ),
-              ),
-              Positioned(
-                left: 0,
-                right: 0,
-                bottom: 0,
-                child: IgnorePointer(
-                  ignoring: !_controlsVisible,
-                  child: AnimatedOpacity(
-                    opacity: _controlsVisible ? 1 : 0,
-                    duration: const Duration(milliseconds: 180),
-                    child: Listener(
-                      // 操作浮层时重新计时，避免拖进度条拖到一半浮层消失。
-                      onPointerDown: (_) => _scheduleAutoHide(),
-                      onPointerUp: (_) => _scheduleAutoHide(),
-                      child: DecoratedBox(
-                        // 控制浮层压在封面/背景上，补一层渐变遮罩保证按钮可读。
-                        decoration: BoxDecoration(
-                          gradient: LinearGradient(
-                            begin: Alignment.topCenter,
-                            end: Alignment.bottomCenter,
-                            colors: [
-                              Colors.transparent,
-                              Colors.black.withValues(alpha: 0.55),
-                            ],
-                          ),
-                        ),
-                        child: _bottomPanel(compact: compact),
-                      ),
+        Positioned(
+          left: 0,
+          right: 0,
+          bottom: 0,
+          child: IgnorePointer(
+            ignoring: !_controlsVisible,
+            child: AnimatedOpacity(
+              opacity: _controlsVisible ? 1 : 0,
+              duration: const Duration(milliseconds: 180),
+              child: Listener(
+                // 操作浮层时重新计时，避免拖进度条拖到一半浮层消失。
+                onPointerDown: (_) => _scheduleAutoHide(),
+                onPointerUp: (_) => _scheduleAutoHide(),
+                child: DecoratedBox(
+                  // 控制浮层压在封面/背景上，补一层渐变遮罩保证按钮可读。
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      colors: [
+                        Colors.transparent,
+                        Colors.black.withValues(alpha: 0.55),
+                      ],
                     ),
                   ),
+                  child: _bottomPanel(compact: compact),
                 ),
               ),
-            ],
+            ),
           ),
         ),
       ],
