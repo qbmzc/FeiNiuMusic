@@ -15,6 +15,93 @@ struct _MyApplication {
 
 G_DEFINE_TYPE(MyApplication, my_application, GTK_TYPE_APPLICATION)
 
+static void window_added_cb(GtkApplication*, GtkWindow* window, gpointer) {
+  GdkVisual* visual = gdk_screen_get_rgba_visual(gtk_window_get_screen(window));
+  if (visual != nullptr) {
+    gtk_widget_set_visual(GTK_WIDGET(window), visual);
+  }
+}
+
+static void lyrics_method_call_cb(FlMethodChannel*, FlMethodCall* call,
+                                 gpointer user_data) {
+  GtkWindow* window = GTK_WINDOW(user_data);
+  const gchar* method = fl_method_call_get_name(call);
+  if (g_strcmp0(method, "showPassive") == 0) {
+    gtk_widget_show(GTK_WIDGET(window));
+  } else if (g_strcmp0(method, "setIgnoreMouseEvents") == 0) {
+    FlValue* args = fl_method_call_get_args(call);
+    if (args == nullptr || fl_value_get_type(args) != FL_VALUE_TYPE_BOOL) {
+      fl_method_call_respond_error(call, "INVALID_ARGUMENT", "Expected boolean",
+                                  nullptr, nullptr);
+      return;
+    }
+    cairo_region_t* region = fl_value_get_bool(args) ? cairo_region_create() : nullptr;
+    gtk_widget_input_shape_combine_region(GTK_WIDGET(window), region);
+    if (region != nullptr) cairo_region_destroy(region);
+  } else {
+    fl_method_call_respond_not_implemented(call, nullptr);
+    return;
+  }
+  fl_method_call_respond_success(call, nullptr, nullptr);
+}
+
+static void tray_method_call_cb(FlMethodChannel*, FlMethodCall* call, gpointer) {
+  if (g_strcmp0(fl_method_call_get_name(call), "hasStatusNotifierHost") != 0) {
+    fl_method_call_respond_not_implemented(call, nullptr);
+    return;
+  }
+  g_bus_get(G_BUS_TYPE_SESSION, nullptr,
+      [](GObject*, GAsyncResult* result, gpointer data) {
+        g_autoptr(FlMethodCall) pending = FL_METHOD_CALL(data);
+        g_autoptr(GError) error = nullptr;
+        g_autoptr(GDBusConnection) connection = g_bus_get_finish(result, &error);
+        if (connection == nullptr) {
+          g_autoptr(FlValue) value = fl_value_new_bool(false);
+          fl_method_call_respond_success(pending, value, nullptr);
+          return;
+        }
+        g_dbus_connection_call(connection, "org.kde.StatusNotifierWatcher",
+            "/StatusNotifierWatcher", "org.freedesktop.DBus.Properties", "Get",
+            g_variant_new("(ss)", "org.kde.StatusNotifierWatcher",
+                          "IsStatusNotifierHostRegistered"),
+            G_VARIANT_TYPE("(v)"), G_DBUS_CALL_FLAGS_NONE, 1000, nullptr,
+            [](GObject* object, GAsyncResult* response, gpointer user_data) {
+              g_autoptr(FlMethodCall) pending_call = FL_METHOD_CALL(user_data);
+              g_autoptr(GError) call_error = nullptr;
+              g_autoptr(GVariant) reply = g_dbus_connection_call_finish(
+                  G_DBUS_CONNECTION(object), response, &call_error);
+              GVariant* property = nullptr;
+              if (reply != nullptr) g_variant_get(reply, "(v)", &property);
+              bool supported = property != nullptr &&
+                  g_variant_is_of_type(property, G_VARIANT_TYPE_BOOLEAN) &&
+                  g_variant_get_boolean(property);
+              if (property != nullptr) g_variant_unref(property);
+              g_autoptr(FlValue) value = fl_value_new_bool(supported);
+              fl_method_call_respond_success(pending_call, value, nullptr);
+            }, g_object_ref(pending));
+      }, g_object_ref(call));
+}
+
+static void lyrics_window_created_cb(FlPluginRegistry* registry) {
+  FlView* view = FL_VIEW(registry);
+  GtkWindow* window = GTK_WINDOW(gtk_widget_get_toplevel(GTK_WIDGET(view)));
+  GdkRGBA transparent = {0, 0, 0, 0};
+  fl_view_set_background_color(view, &transparent);
+  gtk_widget_set_app_paintable(GTK_WIDGET(window), TRUE);
+  gtk_window_set_accept_focus(window, FALSE);
+  gtk_window_set_focus_on_map(window, FALSE);
+  fl_register_plugins(registry);
+
+  g_autoptr(FlPluginRegistrar) registrar =
+      fl_plugin_registry_get_registrar_for_plugin(registry, "DesktopLyricsWindow");
+  g_autoptr(FlStandardMethodCodec) codec = fl_standard_method_codec_new();
+  g_autoptr(FlMethodChannel) channel = fl_method_channel_new(
+      fl_plugin_registrar_get_messenger(registrar),
+      "com.feiniu.music/desktop_lyrics_window/native", FL_METHOD_CODEC(codec));
+  fl_method_channel_set_method_call_handler(channel, lyrics_method_call_cb,
+                                           g_object_ref(window), g_object_unref);
+}
+
 // Called when first Flutter frame received.
 static void first_frame_cb(MyApplication* self, FlView* view) {
   gtk_widget_show(gtk_widget_get_toplevel(GTK_WIDGET(view)));
@@ -75,8 +162,13 @@ static void my_application_activate(GApplication* application) {
   gtk_widget_realize(GTK_WIDGET(view));
 
   fl_register_plugins(FL_PLUGIN_REGISTRY(view));
-  desktop_multi_window_plugin_set_window_created_callback(
-      [](FlPluginRegistry* registry) { fl_register_plugins(registry); });
+  desktop_multi_window_plugin_set_window_created_callback(lyrics_window_created_cb);
+  g_autoptr(FlStandardMethodCodec) codec = fl_standard_method_codec_new();
+  g_autoptr(FlMethodChannel) tray_channel = fl_method_channel_new(
+      fl_engine_get_binary_messenger(fl_view_get_engine(view)),
+      "com.feiniu.music/desktop_tray", FL_METHOD_CODEC(codec));
+  fl_method_channel_set_method_call_handler(tray_channel, tray_method_call_cb,
+                                           nullptr, nullptr);
 
   gtk_widget_grab_focus(GTK_WIDGET(view));
 }
@@ -104,11 +196,18 @@ static gboolean my_application_local_command_line(GApplication* application,
 
 // Implements GApplication::startup.
 static void my_application_startup(GApplication* application) {
-  // MyApplication* self = MY_APPLICATION(object);
-
-  // Perform any actions required at application startup.
-
   G_APPLICATION_CLASS(my_application_parent_class)->startup(application);
+  g_signal_connect(application, "window-added", G_CALLBACK(window_added_cb), nullptr);
+  g_autofree gchar* executable = g_file_read_link("/proc/self/exe", nullptr);
+  if (executable != nullptr) {
+    g_autofree gchar* directory = g_path_get_dirname(executable);
+    g_autofree gchar* icon = g_build_filename(
+        directory, "data", "flutter_assets", "assets", "icon", "app_icon.png", nullptr);
+    g_autoptr(GError) error = nullptr;
+    if (!gtk_window_set_default_icon_from_file(icon, &error)) {
+      g_warning("Cannot load application icon: %s", error->message);
+    }
+  }
 }
 
 // Implements GApplication::shutdown.

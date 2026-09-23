@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:desktop_multi_window/desktop_multi_window.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:window_manager/window_manager.dart';
@@ -15,7 +16,7 @@ const _desktopLyricsChannel = WindowMethodChannel(
   mode: ChannelMode.bidirectional,
 );
 
-/// 桌面歌词窗口的原生通道（仅 macOS 注册）。
+/// 桌面歌词窗口的原生通道（macOS / Linux）。
 const _desktopLyricsNativeChannel = MethodChannel(
   'com.feiniu.music/desktop_lyrics_window/native',
 );
@@ -39,7 +40,7 @@ const _baseTextStyle = TextStyle(
 /// Windows/Linux 没有该通道，退化为「仅在窗口隐藏时显示一次」，避免
 /// window_manager.show()（Windows 会 SetForegroundWindow）被反复调用。
 Future<void> _showWindow() async {
-  if (Platform.isMacOS) {
+  if (Platform.isMacOS || Platform.isLinux) {
     try {
       await _desktopLyricsNativeChannel
           .invokeMethod<void>('showPassive')
@@ -61,7 +62,14 @@ Future<void> _showWindow() async {
 /// 看起来就像歌词窗口被隐藏）或穿透到下层应用的按钮。
 Future<void> _applyClickThrough(String? position) async {
   final ignore = position == DesktopLyricsSettings.positionLocked;
-  await windowManager.setIgnoreMouseEvents(ignore, forward: ignore);
+  if (Platform.isLinux) {
+    await _desktopLyricsNativeChannel.invokeMethod<void>(
+      'setIgnoreMouseEvents',
+      ignore,
+    );
+  } else {
+    await windowManager.setIgnoreMouseEvents(ignore, forward: ignore);
+  }
 }
 
 /// 第二个 Flutter 引擎中的桌面歌词窗口。
@@ -84,17 +92,18 @@ Future<void> runDesktopLyricsWindow(WindowController controller) async {
     titleBarStyle: TitleBarStyle.hidden,
     windowButtonVisibility: false,
   );
-  await windowManager.waitUntilReadyToShow(windowOptions, () async {
+  await windowManager.waitUntilReadyToShow(windowOptions);
+  if (Platform.isLinux) {
+    await windowManager.setAsFrameless();
+  } else {
     await windowManager.setHasShadow(false);
-    // setAsFrameless() 在 macOS window_manager 0.5.x 会把 isOpaque 设回 true，
-    // 导致背景透明度看起来始终不生效。隐藏标题栏已足够无边框，这里显式保留透明窗口。
-    await windowManager.setBackgroundColor(Colors.transparent);
-    await _applyClickThrough(DesktopLyricsSettings.positionFixed);
-    await _showWindow();
-  });
+  }
+  await windowManager.setBackgroundColor(Colors.transparent);
+  await _applyClickThrough(DesktopLyricsSettings.positionFixed);
 
   final state = DesktopLyricsWindowState();
   String? lastPosition;
+  Offset? lastLockedPosition;
   const channel = _desktopLyricsChannel;
   await channel.setMethodCallHandler((call) async {
     switch (call.method) {
@@ -105,9 +114,6 @@ Future<void> runDesktopLyricsWindow(WindowController controller) async {
         return null;
       case 'show':
         await _showWindow();
-        await _applyClickThrough(
-          lastPosition ?? DesktopLyricsSettings.positionFixed,
-        );
         return null;
       case 'hide':
         await windowManager.hide();
@@ -118,18 +124,23 @@ Future<void> runDesktopLyricsWindow(WindowController controller) async {
             ? arguments['mode'] as String?
             : arguments as String?;
         final locked = position == DesktopLyricsSettings.positionLocked;
-        if (position != lastPosition || locked) {
-          lastPosition = position;
+        final x = arguments is Map
+            ? (arguments['x'] as num?)?.toDouble()
+            : null;
+        final y = arguments is Map
+            ? (arguments['y'] as num?)?.toDouble()
+            : null;
+        final coordinates = x != null && y != null ? Offset(x, y) : null;
+        if (position != lastPosition ||
+            (locked && coordinates != lastLockedPosition)) {
           await _applyClickThrough(position);
-          if (locked && arguments is Map) {
-            final x = (arguments['x'] as num?)?.toDouble();
-            final y = (arguments['y'] as num?)?.toDouble();
-            if (x != null && y != null) {
-              await windowManager.setPosition(Offset(x, y));
-            }
+          if (locked && coordinates != null) {
+            await windowManager.setPosition(coordinates);
           } else if (!locked) {
             await _applyPosition(position);
           }
+          lastPosition = position;
+          lastLockedPosition = coordinates;
         }
         return null;
       default:
@@ -137,10 +148,8 @@ Future<void> runDesktopLyricsWindow(WindowController controller) async {
     }
   });
 
-  // Parent window registers its handler before creating this window. The
-  // handshake lets it flush the latest song/style payload after startup.
-  unawaited(channel.invokeMethod<void>('ready'));
   runApp(DesktopLyricsWindow(state: state));
+  await channel.invokeMethod<void>('ready');
 }
 
 Future<void> _applyPosition(String? value) async {
@@ -191,8 +200,34 @@ class _DesktopLyricsSurface extends StatefulWidget {
   State<_DesktopLyricsSurface> createState() => _DesktopLyricsSurfaceState();
 }
 
-class _DesktopLyricsSurfaceState extends State<_DesktopLyricsSurface> {
+class _DesktopLyricsSurfaceState extends State<_DesktopLyricsSurface>
+    with WindowListener {
   Offset? _windowPosition;
+  Timer? _moveTimer;
+
+  @override
+  void initState() {
+    super.initState();
+    if (Platform.isLinux) windowManager.addListener(this);
+  }
+
+  @override
+  void dispose() {
+    _moveTimer?.cancel();
+    if (Platform.isLinux) windowManager.removeListener(this);
+    super.dispose();
+  }
+
+  @override
+  void onWindowMove() {
+    if (widget.payload['position'] == DesktopLyricsSettings.positionLocked) {
+      return;
+    }
+    _moveTimer?.cancel();
+    _moveTimer = Timer(const Duration(milliseconds: 200), () {
+      unawaited(_saveDraggedPosition());
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -283,19 +318,41 @@ class _DesktopLyricsSurfaceState extends State<_DesktopLyricsSurface> {
         ],
       ),
     );
+    final locked = payload['position'] == DesktopLyricsSettings.positionLocked;
+    if (Platform.isLinux) {
+      // GTK 接管拖动后不会把抬起事件交回 Flutter，不能依赖 Pan 手势复位。
+      return Listener(
+        behavior: HitTestBehavior.opaque,
+        onPointerDown: locked
+            ? null
+            : (event) {
+                if (event.buttons == kPrimaryButton) {
+                  unawaited(windowManager.startDragging());
+                }
+              },
+        child: content,
+      );
+    }
     return GestureDetector(
-      onPanStart: (_) async {
-        _windowPosition = await windowManager.getPosition();
-      },
-      onPanUpdate: (details) {
-        final origin = _windowPosition;
-        if (origin == null) return;
-        _windowPosition = origin + details.delta;
-        unawaited(windowManager.setPosition(_windowPosition!));
-      },
-      onPanEnd: (_) {
-        unawaited(_saveDraggedPosition());
-      },
+      behavior: HitTestBehavior.opaque,
+      onPanStart: locked
+          ? null
+          : (_) async {
+              _windowPosition = await windowManager.getPosition();
+            },
+      onPanUpdate: locked
+          ? null
+          : (details) {
+              final origin = _windowPosition;
+              if (origin == null) return;
+              _windowPosition = origin + details.delta;
+              unawaited(windowManager.setPosition(_windowPosition!));
+            },
+      onPanEnd: locked
+          ? null
+          : (_) {
+              unawaited(_saveDraggedPosition());
+            },
       child: content,
     );
   }

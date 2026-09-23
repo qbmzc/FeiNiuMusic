@@ -27,6 +27,10 @@ class DesktopLyricsService {
   static bool _windowReady = false;
   static bool _creating = false;
   static bool _syncQueued = false;
+  static bool _syncing = false;
+  static bool _visible = false;
+  static Map<String, Object?>? _lastPayload;
+  static Map<String, Object?>? _lastPosition;
   static WindowController? _window;
 
   static bool get supported =>
@@ -39,6 +43,9 @@ class DesktopLyricsService {
     await _channel.setMethodCallHandler((call) async {
       if (call.method == 'ready') {
         _windowReady = true;
+        _visible = false;
+        _lastPayload = null;
+        _lastPosition = null;
         _queueSync();
       } else if (call.method == 'draggedPosition' && call.arguments is Map) {
         final arguments = Map<String, Object?>.from(call.arguments as Map);
@@ -61,11 +68,32 @@ class DesktopLyricsService {
       DesktopLyricsSettings.position,
       LyricsService.instance.currentLineText,
       LyricsService.instance.controller.activeIndexNotifiter,
+      LyricsService.instance.controller.lyricNotifier,
       PlayerService.instance.currentSong,
       PlayerService.instance.position,
     ]) {
       notifier.addListener(_queueSync);
     }
+    onWindowsChanged.listen((_) async {
+      final window = _window;
+      if (window == null) return;
+      try {
+        final windows = await WindowController.getAll();
+        if (_window == window &&
+            !windows.any(
+              (candidate) => candidate.windowId == window.windowId,
+            )) {
+          _window = null;
+          _windowReady = false;
+          _queueSync();
+        }
+      } catch (error) {
+        if (kDebugMode) {
+          debugPrint('desktop lyrics window lookup failed: $error');
+        }
+      }
+    });
+    _queueSync();
   }
 
   @visibleForTesting
@@ -126,7 +154,7 @@ class DesktopLyricsService {
     required Duration position,
   }) {
     if (!enabled || title == null || title.trim().isEmpty) return null;
-    if (activeIndex < 0 || activeIndex >= lines.length) {
+    if (lines.isEmpty) {
       return const {
         'currentLine': '暂无歌词',
         'nextLine': '',
@@ -134,10 +162,14 @@ class DesktopLyricsService {
         'karaoke': false,
       };
     }
+    if (activeIndex < 0 || activeIndex >= lines.length) {
+      activeIndex = lines.lastIndexWhere((line) => line.start <= position);
+      if (activeIndex < 0) activeIndex = 0;
+    }
     final current = lines[activeIndex];
     final next = activeIndex + 1 < lines.length ? lines[activeIndex + 1] : null;
     return {
-      'currentLine': current.text.trim().isEmpty ? '暂无歌词' : current.text.trim(),
+      'currentLine': current.text.trim(),
       'nextLine': next?.text.trim() ?? '',
       'progress': progressForLine(
         line: current,
@@ -150,13 +182,31 @@ class DesktopLyricsService {
   }
 
   static void _queueSync() {
-    if (_syncQueued) return;
     _syncQueued = true;
-    scheduleMicrotask(() {
-      _syncQueued = false;
-      unawaited(_sync());
+    if (_syncing) return;
+    _syncing = true;
+    scheduleMicrotask(() async {
+      try {
+        while (_syncQueued) {
+          _syncQueued = false;
+          try {
+            await _sync();
+          } catch (error) {
+            _lastPayload = null;
+            _lastPosition = null;
+            _visible = false;
+            if (kDebugMode) debugPrint('desktop lyrics sync failed: $error');
+          }
+        }
+      } finally {
+        _syncing = false;
+      }
     });
   }
+
+  static Future<void> _send(String method, [Object? arguments]) => _channel
+      .invokeMethod<void>(method, arguments)
+      .timeout(const Duration(seconds: 2));
 
   static Future<void> _sync() async {
     final player = PlayerService.instance;
@@ -169,34 +219,40 @@ class DesktopLyricsService {
       position: player.position.value,
     );
     if (payload == null) {
-      if (_windowReady) {
-        await _channel.invokeMethod<void>('hide').catchError((_) {});
+      if (_windowReady && _visible) {
+        await _send('hide');
+        _visible = false;
       }
       return;
     }
     await _ensureWindow();
     if (!_windowReady) return;
-    await _channel
-        .invokeMethod<void>('setState', {
-          ...payload,
-          'fontFamily': DesktopLyricsSettings.fontFamily.value,
-          'fontSize': DesktopLyricsSettings.fontSize.value,
-          'textColor': DesktopLyricsSettings.textColor.value,
-          'highlightColor': DesktopLyricsSettings.highlightColor.value,
-          'backgroundOpacity': DesktopLyricsSettings.backgroundOpacity.value,
-          'position': DesktopLyricsSettings.position.value,
-          'lockedPositionX': DesktopLyricsSettings.lockedPositionX,
-          'lockedPositionY': DesktopLyricsSettings.lockedPositionY,
-        })
-        .catchError((_) {});
-    await _channel
-        .invokeMethod<void>('position', {
-          'mode': DesktopLyricsSettings.position.value,
-          'x': DesktopLyricsSettings.lockedPositionX,
-          'y': DesktopLyricsSettings.lockedPositionY,
-        })
-        .catchError((_) {});
-    await _channel.invokeMethod<void>('show').catchError((_) {});
+    final state = <String, Object?>{
+      ...payload,
+      'fontFamily': DesktopLyricsSettings.fontFamily.value,
+      'fontSize': DesktopLyricsSettings.fontSize.value,
+      'textColor': DesktopLyricsSettings.textColor.value,
+      'highlightColor': DesktopLyricsSettings.highlightColor.value,
+      'backgroundOpacity': DesktopLyricsSettings.backgroundOpacity.value,
+      'position': DesktopLyricsSettings.position.value,
+    };
+    if (!mapEquals(state, _lastPayload)) {
+      await _send('setState', state);
+      _lastPayload = state;
+    }
+    final position = <String, Object?>{
+      'mode': DesktopLyricsSettings.position.value,
+      'x': DesktopLyricsSettings.lockedPositionX,
+      'y': DesktopLyricsSettings.lockedPositionY,
+    };
+    if (!mapEquals(position, _lastPosition)) {
+      await _send('position', position);
+      _lastPosition = position;
+    }
+    if (!_visible) {
+      await _send('show');
+      _visible = true;
+    }
   }
 
   static Future<void> _ensureWindow() async {

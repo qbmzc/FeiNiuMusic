@@ -214,7 +214,9 @@ class _SettingsPageState extends State<SettingsPage> {
                         builder: (_) => const _DesktopLyricsStyleSheet(),
                       ),
                     ),
-                    if (Platform.isMacOS || Platform.isWindows)
+                    if (Platform.isMacOS ||
+                        Platform.isWindows ||
+                        Platform.isLinux)
                       ValueListenableBuilder<bool>(
                         valueListenable: CloseToTraySettings.enabled,
                         builder: (context, enabled, _) {
@@ -222,6 +224,8 @@ class _SettingsPageState extends State<SettingsPage> {
                             title: '关闭按钮隐藏到托盘',
                             subtitle: Platform.isMacOS
                                 ? '状态栏播放状态开启时，点击关闭按钮隐藏到菜单栏'
+                                : Platform.isLinux
+                                ? '需要桌面支持 AppIndicator；GNOME 需启用托盘扩展'
                                 : '点击窗口关闭按钮时隐藏到系统托盘，而不是退出应用',
                             value: enabled,
                             onChanged: (value) {

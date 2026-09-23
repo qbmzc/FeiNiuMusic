@@ -1,0 +1,10 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=飞牛音乐
+Exec=feiniumusic
+Icon=com.feiniu.music
+Terminal=false
+Categories=AudioVideo;Audio;Music;
+StartupNotify=true
+StartupWMClass=com.feiniu.music

@@ -201,10 +201,10 @@ Future<void> main(List<String> args) async {
   await AppLaunchNavigationSettings.ensureLoaded();
   // DLNA 投屏设置（播放页投屏按钮据此显示/隐藏）
   await DlnaCastSettings.ensureLoaded();
-  // 桌面端「关闭按钮隐藏到托盘」（Windows/macOS 共用，默认开启）
+  // 桌面端「关闭按钮隐藏到托盘」（Windows/macOS/Linux 共用，默认开启）
   await CloseToTraySettings.ensureLoaded();
-  // Windows 系统托盘：拦截关闭按钮 + 托盘菜单（播放控制/退出）。
-  if (Platform.isWindows) {
+  // Windows / Linux 系统托盘；macOS 保留原生状态栏实现。
+  if (DesktopTrayService.supported) {
     await DesktopTrayService.init();
   }
   // 初始化自动重连服务（监听网络变化 + API 失败）
