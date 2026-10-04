@@ -58,7 +58,12 @@ class HomeCoverCarousel extends StatelessWidget {
     // 封面 + 标题 + 副标题两行（有副标题）。避免无副标题时仍预留
     // 副标题行高度，造成卡片下方大片空白。
     final hasSubtitle = items.any((i) => i.subtitle.isNotEmpty);
-    final textHeight = (hasSubtitle ? 38.0 : 22.0) * scale;
+    final textScaler = MediaQuery.textScalerOf(context);
+    final textHeight =
+        6 * scale +
+        textScaler.scale(13 * scale) * 1.15 +
+        (hasSubtitle ? scale + textScaler.scale(11 * scale) * 1.15 : 0) +
+        4 * scale;
     return SizedBox(
       height: coverSize + textHeight,
       child: ListView.separated(

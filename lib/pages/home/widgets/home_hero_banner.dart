@@ -84,37 +84,45 @@ class HomeHeroBanner extends StatelessWidget {
         Positioned(
           left: 16 * scale,
           top: 14 * scale,
-          child: Container(
-            padding: EdgeInsets.symmetric(
-              horizontal: 10 * scale,
-              vertical: 4 * scale,
-            ),
-            decoration: BoxDecoration(
-              color: Colors.black.withValues(alpha: 0.32),
-              borderRadius: BorderRadius.circular(999),
-              border: Border.all(
-                color: Colors.white.withValues(alpha: 0.25),
-                width: 0.6,
+          right: (onRefresh != null ? 60 : 16) * scale,
+          child: Align(
+            alignment: Alignment.centerLeft,
+            child: Container(
+              padding: EdgeInsets.symmetric(
+                horizontal: 10 * scale,
+                vertical: 4 * scale,
               ),
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(
-                  Icons.auto_awesome_rounded,
-                  size: 13 * scale,
-                  color: Colors.white.withValues(alpha: 0.9),
+              decoration: BoxDecoration(
+                color: Colors.black.withValues(alpha: 0.32),
+                borderRadius: BorderRadius.circular(999),
+                border: Border.all(
+                  color: Colors.white.withValues(alpha: 0.25),
+                  width: 0.6,
                 ),
-                SizedBox(width: 5 * scale),
-                Text(
-                  label,
-                  style: TextStyle(
-                    fontSize: 11 * scale,
-                    fontWeight: FontWeight.w600,
-                    color: Colors.white.withValues(alpha: 0.92),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    Icons.auto_awesome_rounded,
+                    size: 13 * scale,
+                    color: Colors.white.withValues(alpha: 0.9),
                   ),
-                ),
-              ],
+                  SizedBox(width: 5 * scale),
+                  Flexible(
+                    child: Text(
+                      label,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 11 * scale,
+                        fontWeight: FontWeight.w600,
+                        color: Colors.white.withValues(alpha: 0.92),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
         ),
@@ -122,8 +130,8 @@ class HomeHeroBanner extends StatelessWidget {
         // 右上角换一首按钮
         if (onRefresh != null)
           Positioned(
-            right: 12,
-            top: 12,
+            right: 12 * scale,
+            top: 12 * scale,
             child: _TvRefreshButton(onRefresh: onRefresh!),
           ),
 
@@ -164,6 +172,7 @@ class HomeHeroBanner extends StatelessWidget {
                   ],
                 ),
               ),
+              SizedBox(width: 12 * scale),
               // 大播放按钮
               _TvPlayButton(onPlay: onPlay, primary: theme.colorScheme.primary),
             ],

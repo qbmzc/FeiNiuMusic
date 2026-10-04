@@ -391,8 +391,8 @@ class _AppAppearanceSettingsPageState extends State<AppAppearanceSettingsPage> {
                             title: '车机界面缩放',
                             value: current * 100,
                             min: 80,
-                            max: 150,
-                            divisions: 14,
+                            max: 200,
+                            divisions: 24,
                             valueText:
                                 '${override == null ? '自动' : '自定义'} ${(current * 100).round()}%',
                             description:

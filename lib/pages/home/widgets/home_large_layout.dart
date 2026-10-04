@@ -18,8 +18,8 @@ import 'home_shortcut_menu.dart';
 /// 首页大屏布局（平板 / TV / Windows）。
 ///
 /// 模块从上到下：
-///   1. 顶部 — 漫游 Banner（左 7） + 四分类快捷四宫格（右 3）
-///   2. 中部三栏 — 「最近播放」「最新歌曲」「收藏」各占 1/3，列表各自可上下滚动
+///   1. 顶部 — 漫游 Banner + 四分类快捷四宫格，窄屏上下排列
+///   2. 中部 — 根据可用宽度排列 1–3 栏，列表各自可上下滚动
 ///   3. 底部 — 推荐歌单 + 最新专辑 横向滑动（左右可滚动）
 ///
 /// 手机端保持原有滚动布局，不进本组件。所有数据与回调由 HomePage 传入。
@@ -85,174 +85,209 @@ class HomeLargeLayout extends StatelessWidget {
     final scale = AppLayoutSettings.tvMode.value
         ? TvLayout.uiScale(context)
         : 1.0;
-    return ListView(
-      padding: EdgeInsets.fromLTRB(
-        24 * scale,
-        8 * scale,
-        24 * scale,
-        24 * scale,
-      ),
-      children: [
-        // 1. 顶部 — 左：漫游 Banner（7） / 右：四分类四宫格（3）
-        if (heroSong != null)
-          IntrinsicHeight(
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final textScale = MediaQuery.textScalerOf(context).scale(17) / 17;
+        final layoutScale = scale * textScale.clamp(1.0, 2.0);
+        final availableWidth = constraints.maxWidth - 48 * scale;
+        final columns =
+            ((availableWidth + 16 * scale) / (300 * layoutScale + 16 * scale))
+                .floor()
+                .clamp(1, 3);
+        final cardWidth =
+            (availableWidth - (columns - 1) * 16 * scale) / columns;
+        return ListView(
+          padding: EdgeInsets.fromLTRB(
+            24 * scale,
+            8 * scale,
+            24 * scale,
+            24 * scale,
+          ),
+          children: [
+            // 1. 顶部 — 左：漫游 Banner（7） / 右：四分类四宫格（3）
+            if (heroSong != null)
+              if (availableWidth >= 900 * layoutScale)
+                IntrinsicHeight(
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Expanded(
+                        flex: 7,
+                        child: HomeHeroBanner(
+                          song: heroSong,
+                          onPlay: onPlayRoam,
+                          onRefresh: onRefreshRoam,
+                          height: 240 * layoutScale,
+                        ),
+                      ),
+                      SizedBox(width: 16 * scale),
+                      Expanded(
+                        flex: 3,
+                        child: _LargeCard(
+                          padding: const EdgeInsets.all(14),
+                          child: HomeShortcutMenu(
+                            items: shortcutItems,
+                            grid2x2: true,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                )
+              else ...[
+                HomeHeroBanner(
+                  song: heroSong,
+                  onPlay: onPlayRoam,
+                  onRefresh: onRefreshRoam,
+                  height: 240 * layoutScale,
+                ),
+                SizedBox(height: 16 * scale),
+                _LargeCard(
+                  padding: const EdgeInsets.all(14),
+                  child: HomeShortcutMenu(items: shortcutItems, grid2x2: true),
+                ),
+              ]
+            else
+              _LargeCard(
+                padding: const EdgeInsets.all(14),
+                child: HomeShortcutMenu(items: shortcutItems, grid2x2: true),
+              ),
+            SizedBox(height: 16 * scale),
+            // 2. 按缩放后的最小卡片宽度换行，避免文字和操作按钮互相挤压。
+            // 固定行高（外层整页 ListView 纵滚，底部推荐歌单/专辑在其下方），
+            // 让每栏卡片高度有界 → 内嵌 ListView 才能独立纵滚。
+            Wrap(
+              key: const ValueKey('home-song-sections'),
+              spacing: 16 * scale,
+              runSpacing: 16 * scale,
               children: [
-                // 左 — 漫游 Banner（高度与右侧四宫格一致）
-                Expanded(
-                  flex: 7,
-                  child: HomeHeroBanner(
-                    song: heroSong,
-                    onPlay: onPlayRoam,
-                    onRefresh: onRefreshRoam,
-                    // 用固定高度让 Banner 与四宫格等高（由 IntrinsicHeight 定高）。
-                    height: 200 * scale,
+                SizedBox(
+                  width: cardWidth,
+                  height: 460 * layoutScale,
+                  child: _LargeCard(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        HomeSectionHeader(
+                          title: '最近播放',
+                          onViewAll: onOpenRecent,
+                        ),
+                        const SizedBox(height: 4),
+                        Expanded(
+                          child: recentSongs.isEmpty
+                              ? const _LargeEmpty(text: '暂无最近播放')
+                              : _LargeScrollableSongList(
+                                  songs: recentSongs,
+                                  onTap: onTapRecent,
+                                  onLongPress: onLongPressRecent,
+                                ),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
-                SizedBox(width: 16 * scale),
-                // 右 — 四分类 2×2 四宫格
-                Expanded(
-                  flex: 3,
+                SizedBox(
+                  width: cardWidth,
+                  height: 460 * layoutScale,
                   child: _LargeCard(
-                    padding: EdgeInsets.all(14 * scale),
-                    child: HomeShortcutMenu(
-                      items: shortcutItems,
-                      grid2x2: true,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        HomeSectionHeader(
+                          title: '最新歌曲',
+                          onViewAll: onOpenSongs,
+                        ),
+                        const SizedBox(height: 4),
+                        Expanded(
+                          child: recentTracks.isEmpty
+                              ? const _LargeEmpty(text: '暂无最新歌曲')
+                              : _LargeScrollableSongList(
+                                  songs: recentTracks,
+                                  onTap: onTapTrack,
+                                  onLongPress: onLongPressTrack,
+                                ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                SizedBox(
+                  width: cardWidth,
+                  height: 460 * layoutScale,
+                  child: _LargeCard(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        HomeSectionHeader(
+                          title: '收藏',
+                          onViewAll: onOpenFavorite,
+                        ),
+                        const SizedBox(height: 4),
+                        Expanded(
+                          child: favoriteSongs.isEmpty
+                              ? const _LargeEmpty(text: '暂无收藏')
+                              : _LargeScrollableSongList(
+                                  songs: favoriteSongs,
+                                  onTap: onTapFavorite,
+                                  onLongPress: onLongPressTrack,
+                                ),
+                        ),
+                      ],
                     ),
                   ),
                 ),
               ],
             ),
-          )
-        else
-          // 漫游数据缺失时，四宫格独立成行
-          _LargeCard(
-            padding: EdgeInsets.all(14 * scale),
-            child: HomeShortcutMenu(items: shortcutItems, grid2x2: true),
-          ),
-        SizedBox(height: 16 * scale),
-        // 2. 中部三栏 — 「最近播放」「最新歌曲」「收藏」各 1/3，列表各自可上下滚动。
-        // 固定行高（外层整页 ListView 纵滚，底部推荐歌单/专辑在其下方），
-        // 让每栏卡片高度有界 → 内嵌 ListView 才能独立纵滚。
-        SizedBox(
-          height: 460 * scale,
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(
-                flex: 1,
-                child: _LargeCard(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      HomeSectionHeader(title: '最近播放', onViewAll: onOpenRecent),
-                      const SizedBox(height: 4),
-                      Expanded(
-                        child: recentSongs.isEmpty
-                            ? const _LargeEmpty(text: '暂无最近播放')
-                            : _LargeScrollableSongList(
-                                songs: recentSongs,
-                                onTap: onTapRecent,
-                                onLongPress: onLongPressRecent,
-                              ),
-                      ),
-                    ],
-                  ),
+            SizedBox(height: 16 * scale),
+            // 3. 底部 — 推荐歌单 + 最新专辑 横向滑动区（各自独立横向 ListView）。
+            if (playlists.isNotEmpty)
+              _LargeCard(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    HomeSectionHeader(
+                      title: '推荐歌单',
+                      onViewAll: onOpenPlaylists,
+                    ),
+                    const SizedBox(height: 4),
+                    _LargeScrollablePlaylistRow(
+                      playlists: playlists,
+                      isTv: AppLayoutSettings.tvMode.value,
+                      onTap: onTapPlaylist,
+                    ),
+                  ],
                 ),
               ),
-              SizedBox(width: 16 * scale),
-              Expanded(
-                flex: 1,
-                child: _LargeCard(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      HomeSectionHeader(title: '最新歌曲', onViewAll: onOpenSongs),
-                      const SizedBox(height: 4),
-                      Expanded(
-                        child: recentTracks.isEmpty
-                            ? const _LargeEmpty(text: '暂无最新歌曲')
-                            : _LargeScrollableSongList(
-                                songs: recentTracks,
-                                onTap: onTapTrack,
-                                onLongPress: onLongPressTrack,
-                              ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-              SizedBox(width: 16 * scale),
-              Expanded(
-                flex: 1,
-                child: _LargeCard(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      HomeSectionHeader(title: '收藏', onViewAll: onOpenFavorite),
-                      const SizedBox(height: 4),
-                      Expanded(
-                        child: favoriteSongs.isEmpty
-                            ? const _LargeEmpty(text: '暂无收藏')
-                            : _LargeScrollableSongList(
-                                songs: favoriteSongs,
-                                onTap: onTapFavorite,
-                                onLongPress: onLongPressTrack,
-                              ),
-                      ),
-                    ],
-                  ),
+            if (recentAlbums.isNotEmpty) ...[
+              SizedBox(height: 16 * scale),
+              _LargeCard(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    HomeSectionHeader(title: '最新专辑', onViewAll: onOpenAlbums),
+                    const SizedBox(height: 4),
+                    HomeCoverCarousel(
+                      coverSize: 128 * scale,
+                      borderRadius: 16,
+                      items: [
+                        for (final a in recentAlbums)
+                          HomeCoverItem(
+                            coverId: a.coverId,
+                            title: a.name,
+                            subtitle: a.trackCount != null
+                                ? '${a.trackCount} 首'
+                                : '',
+                            onTap: () => onTapAlbum(a),
+                          ),
+                      ],
+                    ),
+                  ],
                 ),
               ),
             ],
-          ),
-        ),
-        SizedBox(height: 16 * scale),
-        // 3. 底部 — 推荐歌单 + 最新专辑 横向滑动区（各自独立横向 ListView）。
-        if (playlists.isNotEmpty)
-          _LargeCard(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                HomeSectionHeader(title: '推荐歌单', onViewAll: onOpenPlaylists),
-                const SizedBox(height: 4),
-                _LargeScrollablePlaylistRow(
-                  playlists: playlists,
-                  isTv: AppLayoutSettings.tvMode.value,
-                  onTap: onTapPlaylist,
-                ),
-              ],
-            ),
-          ),
-        if (recentAlbums.isNotEmpty) ...[
-          SizedBox(height: 16 * scale),
-          _LargeCard(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                HomeSectionHeader(title: '最新专辑', onViewAll: onOpenAlbums),
-                const SizedBox(height: 4),
-                HomeCoverCarousel(
-                  coverSize: 128 * scale,
-                  borderRadius: 16,
-                  items: [
-                    for (final a in recentAlbums)
-                      HomeCoverItem(
-                        coverId: a.coverId,
-                        title: a.name,
-                        subtitle: a.trackCount != null
-                            ? '${a.trackCount} 首'
-                            : '',
-                        onTap: () => onTapAlbum(a),
-                      ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-        ],
-      ],
+          ],
+        );
+      },
     );
   }
 }
@@ -305,87 +340,106 @@ class _LargeScrollableSongList extends StatelessWidget {
         : 1.0;
     final artworkSize = 48.0 * scale;
     final isTv = AppLayoutSettings.tvMode.value;
-    return ListView.separated(
-      // TV：加大预建范围，保证方向键能遍历到视口外的行（不会因行未 build
-      // 而找不到下一焦点目标，误跳出列表跳到下方专辑）。
-      scrollCacheExtent: isTv
-          ? const ScrollCacheExtent.pixels(600)
-          : const ScrollCacheExtent.pixels(0),
-      padding: const EdgeInsets.symmetric(vertical: 4),
-      itemCount: songs.length,
-      separatorBuilder: (_, _) => SizedBox(height: 2 * scale),
-      itemBuilder: (context, i) {
-        final song = songs[i];
-        final row = Material(
-          color: Colors.transparent,
-          child: InkWell(
-            borderRadius: BorderRadius.circular(12),
-            onTap: () => onTap(song),
-            onLongPress: onLongPress == null ? null : () => onLongPress!(song),
-            child: Padding(
-              padding: EdgeInsets.symmetric(
-                horizontal: 4 * scale,
-                vertical: 6 * scale,
-              ),
-              child: Row(
-                children: [
-                  ArtworkWidget(
-                    song: song,
-                    size: artworkSize,
-                    borderRadius: 10,
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final textScale = MediaQuery.textScalerOf(context).scale(12) / 12;
+        final trailingDuration =
+            constraints.maxWidth >= 240 * scale * textScale;
+        return ListView.separated(
+          // TV：加大预建范围，保证方向键能遍历到视口外的行（不会因行未 build
+          // 而找不到下一焦点目标，误跳出列表跳到下方专辑）。
+          scrollCacheExtent: isTv
+              ? const ScrollCacheExtent.pixels(600)
+              : const ScrollCacheExtent.pixels(0),
+          padding: const EdgeInsets.symmetric(vertical: 4),
+          itemCount: songs.length,
+          separatorBuilder: (_, _) => SizedBox(height: 2 * scale),
+          itemBuilder: (context, i) {
+            final song = songs[i];
+            final row = Material(
+              color: Colors.transparent,
+              child: InkWell(
+                borderRadius: BorderRadius.circular(12),
+                onTap: () => onTap(song),
+                onLongPress: onLongPress == null
+                    ? null
+                    : () => onLongPress!(song),
+                child: Padding(
+                  padding: EdgeInsets.symmetric(
+                    horizontal: 4 * scale,
+                    vertical: 6 * scale,
                   ),
-                  SizedBox(width: 12 * scale),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Text(
-                          song.title,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            fontSize: 14 * scale,
-                            fontWeight: FontWeight.w600,
-                          ),
+                  child: Row(
+                    children: [
+                      ArtworkWidget(
+                        song: song,
+                        size: artworkSize,
+                        borderRadius: 10,
+                      ),
+                      SizedBox(width: 12 * scale),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              song.title,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                fontSize: 14 * scale,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                            SizedBox(height: 2 * scale),
+                            Text(
+                              song.artistDisplayName,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                fontSize: 12 * scale,
+                                color: scheme.onSurfaceVariant,
+                              ),
+                            ),
+                            if (!trailingDuration && song.durationMs != null)
+                              Text(
+                                _formatDuration(song.durationMs!),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  fontSize: 12 * scale,
+                                  color: scheme.onSurfaceVariant,
+                                ),
+                              ),
+                          ],
                         ),
-                        SizedBox(height: 2 * scale),
+                      ),
+                      if (trailingDuration && song.durationMs != null)
                         Text(
-                          song.artistDisplayName,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
+                          _formatDuration(song.durationMs!),
                           style: TextStyle(
                             fontSize: 12 * scale,
                             color: scheme.onSurfaceVariant,
                           ),
                         ),
-                      ],
-                    ),
+                    ],
                   ),
-                  if (song.durationMs != null)
-                    Text(
-                      _formatDuration(song.durationMs!),
-                      style: TextStyle(
-                        fontSize: 12 * scale,
-                        color: scheme.onSurfaceVariant,
-                      ),
-                    ),
-                ],
+                ),
               ),
-            ),
-          ),
+            );
+            // TV：整行可聚焦（焦点环 + Enter 播放）；onLongPress 保留在手势层，
+            // 与 Touch 设备行为一致。TvFocusable 屏蔽行内 InkWell 的焦点节点，
+            // 保证方向键遍历时每行是唯一焦点目标。
+            if (isTv) {
+              return TvFocusable(
+                borderRadius: BorderRadius.circular(12),
+                onActivate: () => onTap(song),
+                child: row,
+              );
+            }
+            return row;
+          },
         );
-        // TV：整行可聚焦（焦点环 + Enter 播放）；onLongPress 保留在手势层，
-        // 与 Touch 设备行为一致。TvFocusable 屏蔽行内 InkWell 的焦点节点，
-        // 保证方向键遍历时每行是唯一焦点目标。
-        if (isTv) {
-          return TvFocusable(
-            borderRadius: BorderRadius.circular(12),
-            onActivate: () => onTap(song),
-            child: row,
-          );
-        }
-        return row;
       },
     );
   }

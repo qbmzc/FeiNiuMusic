@@ -149,18 +149,25 @@ void main() {
     );
     expect(scale, 1.3);
 
-    await AppLayoutSettings.setTvUiScaleOverride(1.5);
+    await AppLayoutSettings.setTvUiScaleOverride(2.0);
     await tester.pump();
-    expect(TvLayout.uiScale(tester.element(find.byType(Builder))), 1.5);
+    expect(TvLayout.uiScale(tester.element(find.byType(Builder))), 2.0);
 
     AppLayoutSettings.resetForTest();
     await AppLayoutSettings.ensureLoaded();
-    expect(AppLayoutSettings.tvUiScaleOverride.value, 1.5);
+    expect(AppLayoutSettings.tvUiScaleOverride.value, 2.0);
 
     await AppLayoutSettings.setTvUiScaleOverride(null);
     expect(TvLayout.uiScale(tester.element(find.byType(Builder))), 1.3);
     final prefs = await SharedPreferences.getInstance();
     expect(prefs.containsKey('setting_tv_ui_scale_override'), isFalse);
+  });
+
+  test('车机缩放超出范围时限制为 80% 到 200%', () async {
+    await AppLayoutSettings.setTvUiScaleOverride(2.5);
+    expect(AppLayoutSettings.tvUiScaleOverride.value, 2.0);
+    await AppLayoutSettings.setTvUiScaleOverride(0.5);
+    expect(AppLayoutSettings.tvUiScaleOverride.value, 0.8);
   });
 
   group('AppLayoutSettings.consumeTvEdgeHint（首次启动提示）', () {

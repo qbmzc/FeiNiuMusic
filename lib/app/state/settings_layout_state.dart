@@ -219,7 +219,7 @@ class AppLayoutSettings {
     );
     forceTvMode.value = prefs.getBool(_prefsForceTvMode) ?? false;
     final savedTvScale = prefs.getDouble(_prefsTvUiScaleOverride);
-    tvUiScaleOverride.value = savedTvScale?.clamp(0.8, 1.5);
+    tvUiScaleOverride.value = savedTvScale?.clamp(0.8, 2.0);
     _tvEdgeHintShown = prefs.getBool(_prefsTvEdgeHintShown) ?? false;
     trackChangeNotify.value = prefs.getBool(_prefsTrackChangeNotify) ?? false;
     trackChangeOverlayNotify.value =
@@ -270,7 +270,7 @@ class AppLayoutSettings {
   }
 
   static Future<void> setTvUiScaleOverride(double? scale) async {
-    final next = scale?.clamp(0.8, 1.5);
+    final next = scale?.clamp(0.8, 2.0);
     tvUiScaleOverride.value = next;
     final prefs = await SharedPreferences.getInstance();
     if (next == null) {
