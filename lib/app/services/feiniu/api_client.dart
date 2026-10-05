@@ -58,6 +58,10 @@ class FeiNiuApiClient {
     _dio.interceptors.add(
       InterceptorsWrapper(
         onError: (error, handler) {
+          if (CancelToken.isCancel(error)) {
+            handler.next(error);
+            return;
+          }
           // 通知自动重连监听器
           for (final monitor in _reconnectMonitors) {
             monitor(error);
@@ -94,9 +98,7 @@ class FeiNiuApiClient {
                   // Response，传 DioException 会抛「DioException 不是 Response」
                   // 类型错误 → 未捕获异常崩溃。
                   if (kDebugMode) {
-                    debugPrint(
-                      '[ApiClient] Redirect follow failed: $e\n$st',
-                    );
+                    debugPrint('[ApiClient] Redirect follow failed: $e\n$st');
                   }
                   handler.reject(
                     e is DioException
@@ -269,7 +271,10 @@ class FeiNiuApiClient {
   /// 已设置安全码时自动携带 x-access-code / x-access-source。
   Map<String, String> authHeaders() {
     if (_relayMode) {
-      return {'Cookie': 'music-token=$_token; mode=relay', ...accessCodeHeaders()};
+      return {
+        'Cookie': 'music-token=$_token; mode=relay',
+        ...accessCodeHeaders(),
+      };
     }
     return {'Cookie': 'music-token=$_token', ...accessCodeHeaders()};
   }
@@ -349,6 +354,7 @@ class FeiNiuApiClient {
         responseType: ResponseType.json,
       ),
       data: response.requestOptions.data,
+      cancelToken: response.requestOptions.cancelToken,
     );
 
     // 如果返回值还是 3xx，继续跟
@@ -376,10 +382,12 @@ class FeiNiuApiClient {
   Future<Map<String, dynamic>> _get(
     String path, {
     Map<String, dynamic>? queryParameters,
+    CancelToken? cancelToken,
   }) async {
     final response = await _dio.get(
       _url(path),
       queryParameters: queryParameters,
+      cancelToken: cancelToken,
       options: Options(headers: authHeaders()),
     );
     return response.data is Map<String, dynamic>
@@ -566,7 +574,11 @@ class FeiNiuApiClient {
   /// 构造封面图 URL
   /// CachedNetworkImage 按 URL 缓存，图片不变 URL 不变即命中磁盘缓存。
   /// [updatedAt] 可选，传入服务端更新时间戳将追加 `&t=` 参数实现缓存失效（cache busting）。
-  String coverUrl(String coverId, {int size = coverRequestSize, int? updatedAt}) {
+  String coverUrl(
+    String coverId, {
+    int size = coverRequestSize,
+    int? updatedAt,
+  }) {
     var url = '/static/cover?coverId=$coverId&size=$size';
     if (updatedAt != null && updatedAt > 0) {
       url += '&t=$updatedAt';
@@ -640,8 +652,11 @@ class FeiNiuApiClient {
             final nextUri = currentUri.resolve(location);
             // 跨主机跳转 → 剥离飞牛 Cookie；同源 → 保留（反向代理内部转发
             // 仍需鉴权）。
-            currentHeaders =
-                streamRedirectHeaders(currentUri, nextUri, currentHeaders);
+            currentHeaders = streamRedirectHeaders(
+              currentUri,
+              nextUri,
+              currentHeaders,
+            );
             currentUri = nextUri;
             continue;
           }
@@ -651,10 +666,14 @@ class FeiNiuApiClient {
         if (!reachedFinal) {
           return ResolvedStreamUrl(url: url, headers: originalHeaders);
         }
-        final result =
-            ResolvedStreamUrl(url: currentUri.toString(), headers: currentHeaders);
-        _streamResolveCache[url] =
-            _StreamResolveEntry(result, now.add(_streamResolveTtl));
+        final result = ResolvedStreamUrl(
+          url: currentUri.toString(),
+          headers: currentHeaders,
+        );
+        _streamResolveCache[url] = _StreamResolveEntry(
+          result,
+          now.add(_streamResolveTtl),
+        );
         return result;
       } finally {
         client.close(force: true);
@@ -709,7 +728,9 @@ class FeiNiuApiClient {
       ),
     );
     final rawData = response.data;
-    final data = rawData is Map<String, dynamic> ? rawData : <String, dynamic>{};
+    final data = rawData is Map<String, dynamic>
+        ? rawData
+        : <String, dynamic>{};
     final parsed = FeiNiuResponse.fromJson(
       data,
       (d) => (d as Map<String, dynamic>)['coverId'] as String?,
@@ -833,7 +854,8 @@ class FeiNiuApiClient {
     final data = await _get('/album/list-all');
     final body = data['data'];
     final rawList = (body is Map<String, dynamic>) ? body['list'] : null;
-    final list = (rawList as List<dynamic>?)
+    final list =
+        (rawList as List<dynamic>?)
             ?.map((e) => FeiNiuAlbum.fromJson(e as Map<String, dynamic>))
             .toList() ??
         const [];
@@ -888,7 +910,8 @@ class FeiNiuApiClient {
     // _get 返回整个响应体 {code,msg,data}，实际列表在 data.data.list
     final body = data['data'];
     final rawList = (body is Map<String, dynamic>) ? body['list'] : null;
-    final list = (rawList as List<dynamic>?)
+    final list =
+        (rawList as List<dynamic>?)
             ?.map((e) => FeiNiuArtist.fromJson(e as Map<String, dynamic>))
             .toList() ??
         const [];
@@ -1003,10 +1026,12 @@ class FeiNiuApiClient {
     required String query,
     int page = 1,
     int size = 50,
+    CancelToken? cancelToken,
   }) async {
     final data = await _get(
       '/search/track',
       queryParameters: {'q': query, 'page': page, 'size': size},
+      cancelToken: cancelToken,
     );
     final response = FeiNiuResponse.fromJson(
       data,
@@ -1019,10 +1044,12 @@ class FeiNiuApiClient {
     required String query,
     int page = 1,
     int size = 24,
+    CancelToken? cancelToken,
   }) async {
     final data = await _get(
       '/search/album',
       queryParameters: {'q': query, 'page': page, 'size': size},
+      cancelToken: cancelToken,
     );
     final response = FeiNiuResponse.fromJson(
       data,
@@ -1035,10 +1062,12 @@ class FeiNiuApiClient {
     required String query,
     int page = 1,
     int size = 24,
+    CancelToken? cancelToken,
   }) async {
     final data = await _get(
       '/search/artist',
       queryParameters: {'q': query, 'page': page, 'size': size},
+      cancelToken: cancelToken,
     );
     final response = FeiNiuResponse.fromJson(
       data,
@@ -1374,7 +1403,10 @@ class FeiNiuApiClient {
   ) async {
     final data = await _post(
       '/playlist/remove-track',
-      data: {'guid': playlistGuid, 'trackGUIDs': [trackGUID]},
+      data: {
+        'guid': playlistGuid,
+        'trackGUIDs': [trackGUID],
+      },
     );
     final response = FeiNiuResponse.fromJson(data, null);
     if (!response.isSuccess) {

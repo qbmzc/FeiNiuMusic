@@ -13,6 +13,7 @@ import '../../../components/focus/tv_focusable.dart';
 import 'home_cover_carousel.dart';
 import 'home_hero_banner.dart';
 import 'home_section_header.dart';
+import 'home_section_feedback.dart';
 import 'home_shortcut_menu.dart';
 
 /// 首页大屏布局（平板 / TV / Windows）。
@@ -25,6 +26,7 @@ import 'home_shortcut_menu.dart';
 /// 手机端保持原有滚动布局，不进本组件。所有数据与回调由 HomePage 传入。
 class HomeLargeLayout extends StatelessWidget {
   final SongEntity? heroSong;
+  final Map<HomeSection, Widget> sectionFeedback;
   final VoidCallback onPlayRoam;
   final VoidCallback onRefreshRoam;
   final List<HomeShortcutItem> shortcutItems;
@@ -50,6 +52,7 @@ class HomeLargeLayout extends StatelessWidget {
   const HomeLargeLayout({
     super.key,
     this.heroSong,
+    this.sectionFeedback = const {},
     required this.onPlayRoam,
     required this.onRefreshRoam,
     required this.shortcutItems,
@@ -104,6 +107,8 @@ class HomeLargeLayout extends StatelessWidget {
             24 * scale,
           ),
           children: [
+            if (sectionFeedback[HomeSection.roam] case final Widget feedback)
+              feedback,
             // 1. 顶部 — 左：漫游 Banner（7） / 右：四分类四宫格（3）
             if (heroSong != null)
               if (availableWidth >= 900 * layoutScale)
@@ -172,10 +177,14 @@ class HomeLargeLayout extends StatelessWidget {
                           title: '最近播放',
                           onViewAll: onOpenRecent,
                         ),
+                        if (recentSongs.isNotEmpty &&
+                            sectionFeedback[HomeSection.history] != null)
+                          sectionFeedback[HomeSection.history]!,
                         const SizedBox(height: 4),
                         Expanded(
                           child: recentSongs.isEmpty
-                              ? const _LargeEmpty(text: '暂无最近播放')
+                              ? (sectionFeedback[HomeSection.history] ??
+                                    const _LargeEmpty(text: '暂无最近播放'))
                               : _LargeScrollableSongList(
                                   songs: recentSongs,
                                   onTap: onTapRecent,
@@ -197,10 +206,14 @@ class HomeLargeLayout extends StatelessWidget {
                           title: '最新歌曲',
                           onViewAll: onOpenSongs,
                         ),
+                        if (recentTracks.isNotEmpty &&
+                            sectionFeedback[HomeSection.tracks] != null)
+                          sectionFeedback[HomeSection.tracks]!,
                         const SizedBox(height: 4),
                         Expanded(
                           child: recentTracks.isEmpty
-                              ? const _LargeEmpty(text: '暂无最新歌曲')
+                              ? (sectionFeedback[HomeSection.tracks] ??
+                                    const _LargeEmpty(text: '暂无最新歌曲'))
                               : _LargeScrollableSongList(
                                   songs: recentTracks,
                                   onTap: onTapTrack,
@@ -222,10 +235,14 @@ class HomeLargeLayout extends StatelessWidget {
                           title: '收藏',
                           onViewAll: onOpenFavorite,
                         ),
+                        if (favoriteSongs.isNotEmpty &&
+                            sectionFeedback[HomeSection.favorites] != null)
+                          sectionFeedback[HomeSection.favorites]!,
                         const SizedBox(height: 4),
                         Expanded(
                           child: favoriteSongs.isEmpty
-                              ? const _LargeEmpty(text: '暂无收藏')
+                              ? (sectionFeedback[HomeSection.favorites] ??
+                                    const _LargeEmpty(text: '暂无收藏'))
                               : _LargeScrollableSongList(
                                   songs: favoriteSongs,
                                   onTap: onTapFavorite,
@@ -240,7 +257,8 @@ class HomeLargeLayout extends StatelessWidget {
             ),
             SizedBox(height: 16 * scale),
             // 3. 底部 — 推荐歌单 + 最新专辑 横向滑动区（各自独立横向 ListView）。
-            if (playlists.isNotEmpty)
+            if (playlists.isNotEmpty ||
+                sectionFeedback.containsKey(HomeSection.playlists))
               _LargeCard(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -250,15 +268,20 @@ class HomeLargeLayout extends StatelessWidget {
                       onViewAll: onOpenPlaylists,
                     ),
                     const SizedBox(height: 4),
-                    _LargeScrollablePlaylistRow(
-                      playlists: playlists,
-                      isTv: AppLayoutSettings.tvMode.value,
-                      onTap: onTapPlaylist,
-                    ),
+                    if (sectionFeedback[HomeSection.playlists]
+                        case final Widget feedback)
+                      feedback,
+                    if (playlists.isNotEmpty)
+                      _LargeScrollablePlaylistRow(
+                        playlists: playlists,
+                        isTv: AppLayoutSettings.tvMode.value,
+                        onTap: onTapPlaylist,
+                      ),
                   ],
                 ),
               ),
-            if (recentAlbums.isNotEmpty) ...[
+            if (recentAlbums.isNotEmpty ||
+                sectionFeedback.containsKey(HomeSection.albums)) ...[
               SizedBox(height: 16 * scale),
               _LargeCard(
                 child: Column(
@@ -266,21 +289,25 @@ class HomeLargeLayout extends StatelessWidget {
                   children: [
                     HomeSectionHeader(title: '最新专辑', onViewAll: onOpenAlbums),
                     const SizedBox(height: 4),
-                    HomeCoverCarousel(
-                      coverSize: 128 * scale,
-                      borderRadius: 16,
-                      items: [
-                        for (final a in recentAlbums)
-                          HomeCoverItem(
-                            coverId: a.coverId,
-                            title: a.name,
-                            subtitle: a.trackCount != null
-                                ? '${a.trackCount} 首'
-                                : '',
-                            onTap: () => onTapAlbum(a),
-                          ),
-                      ],
-                    ),
+                    if (sectionFeedback[HomeSection.albums]
+                        case final Widget feedback)
+                      feedback,
+                    if (recentAlbums.isNotEmpty)
+                      HomeCoverCarousel(
+                        coverSize: 128 * scale,
+                        borderRadius: 16,
+                        items: [
+                          for (final a in recentAlbums)
+                            HomeCoverItem(
+                              coverId: a.coverId,
+                              title: a.name,
+                              subtitle: a.trackCount != null
+                                  ? '${a.trackCount} 首'
+                                  : '',
+                              onTap: () => onTapAlbum(a),
+                            ),
+                        ],
+                      ),
                   ],
                 ),
               ),

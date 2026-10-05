@@ -16,6 +16,7 @@ import '../../app/state/settings_state.dart';
 import '../../app/state/song_state.dart';
 import '../../app/tv/tv_layout.dart';
 import '../../app/utils/api_cache_manager.dart';
+import '../../app/utils/cover_preload_queue.dart';
 import '../../app/utils/primary_tab_refresh_mixin.dart';
 import '../../components/index.dart';
 import '../library/library_detail_pages.dart';
@@ -28,6 +29,7 @@ import 'widgets/home_hero_banner.dart';
 import 'widgets/home_large_layout.dart';
 import 'widgets/home_quick_actions.dart';
 import 'widgets/home_section_header.dart';
+import 'widgets/home_section_feedback.dart';
 import 'widgets/home_shortcut_menu.dart';
 
 /// 首页缓存
@@ -109,6 +111,20 @@ class _HomePageState extends State<HomePage>
   late final _playlists = createSignal<List<FeiNiuPlaylist>>([]);
   late final _recentTracks = createSignal<List<SongEntity>>([]);
   late final _isRefreshing = createSignal(false);
+  late final _pendingSections = createSignal<Set<HomeSection>>({});
+  late final _failedSections = createSignal<Set<HomeSection>>({});
+  Future<void>? _loadFuture;
+  final Map<HomeSection, Future<void>> _sectionLoads = {};
+  late final CoverPreloadQueue _coverPreloads = CoverPreloadQueue(
+    load: _preloadCover,
+    onError: (error) => debugPrint('[HomePage] cover preload failed: $error'),
+  );
+
+  @override
+  void dispose() {
+    _coverPreloads.dispose();
+    super.dispose();
+  }
 
   @override
   void initState() {
@@ -136,7 +152,76 @@ class _HomePageState extends State<HomePage>
     if (mounted) await _loadAll();
   }
 
-  Future<void> _loadAll({bool forceRefresh = false}) async {
+  Future<void> _loadAll({bool forceRefresh = false}) {
+    return _loadFuture ??= _loadDashboard(
+      forceRefresh: forceRefresh,
+    ).whenComplete(() => _loadFuture = null);
+  }
+
+  Future<void> _loadSection(HomeSection section) {
+    return _sectionLoads[section] ??= _loadSingleSection(section).whenComplete(
+      () {
+        _sectionLoads.remove(section);
+      },
+    );
+  }
+
+  Future<void> _loadSingleSection(HomeSection section) async {
+    if (!mounted) return;
+    _pendingSections.value = {..._pendingSections.value, section};
+    _failedSections.value = {..._failedSections.value}..remove(section);
+    try {
+      await switch (section) {
+        HomeSection.roam => _loadRoam(),
+        HomeSection.favorites => _loadFavorites(),
+        HomeSection.history => _loadRecentHistory(),
+        HomeSection.albums => _loadRecentAlbums(),
+        HomeSection.playlists => _loadPlaylists(),
+        HomeSection.tracks => _loadRecentTracks(),
+      };
+    } catch (_) {
+      // 各 loader 已记录具体错误；保留缓存并仅标记失败的模块。
+      if (mounted) _failedSections.value = {..._failedSections.value, section};
+    } finally {
+      if (mounted) {
+        _pendingSections.value = {..._pendingSections.value}..remove(section);
+        _preloadHomeCovers();
+      }
+    }
+  }
+
+  bool _hasSectionData(HomeSection section) => switch (section) {
+    HomeSection.roam => _heroSong != null,
+    HomeSection.favorites => _favoriteSongs.value.isNotEmpty,
+    HomeSection.history => _recentSongs.value.isNotEmpty,
+    HomeSection.albums => _recentAlbums.value.isNotEmpty,
+    HomeSection.playlists => _playlists.value.isNotEmpty,
+    HomeSection.tracks => _recentTracks.value.isNotEmpty,
+  };
+
+  Widget? _sectionFeedback(HomeSection section, {bool hasData = false}) {
+    final loading = _pendingSections.value.contains(section);
+    if (loading && hasData) return null;
+    if (!loading && !_failedSections.value.contains(section)) return null;
+    return HomeSectionFeedback(
+      section: section,
+      loading: loading,
+      onRetry: () {
+        if (!_pendingSections.value.contains(section)) {
+          unawaited(_retrySection(section));
+        }
+      },
+    );
+  }
+
+  Future<void> _retrySection(HomeSection section) async {
+    await _loadSection(section);
+    if (mounted) await _persistHomeCache();
+  }
+
+  Future<void> _loadDashboard({bool forceRefresh = false}) async {
+    _pendingSections.value = HomeSection.values.toSet();
+    _failedSections.value = {};
     const homeCacheScope = 'home';
     const homeCacheKey = 'dashboard';
 
@@ -178,15 +263,10 @@ class _HomePageState extends State<HomePage>
     }
 
     // 后台异步刷新最新数据（缓存渲染后继续执行），完成后写回缓存
-    _isRefreshing.value = !_loading.value; // 非首次加载才显示右上角转圈
-    await Future.wait([
-      _loadRoam(),
-      _loadFavorites(),
-      _loadRecentHistory(),
-      _loadRecentAlbums(),
-      _loadPlaylists(),
-      _loadRecentTracks(),
-    ]);
+    if (!mounted) return;
+    _loading.value = false;
+    _isRefreshing.value = true;
+    await Future.wait(HomeSection.values.map(_loadSection));
     if (mounted) {
       _loading.value = false;
       _isRefreshing.value = false;
@@ -199,32 +279,33 @@ class _HomePageState extends State<HomePage>
         'playlists=${_playlists.value.length} '
         'tracks=${_recentTracks.value.length}',
       );
-      // 写回缓存（永久保留，下次启动仍用于渲染）
-      try {
-        final data = _HomeCacheData(
-          favorites: _favoriteSongs.value,
-          recentSongs: _recentSongs.value,
-          recentAlbums: _recentAlbums.value,
-          playlists: _playlists.value,
-          recentTracks: _recentTracks.value,
-        );
-        await ApiCacheManager.instance.set(
-          scope: homeCacheScope,
-          key: homeCacheKey,
-          jsonData: jsonEncode(data.toJson()),
-        );
-      } catch (e, stack) {
-        debugPrint('[HomePage] cache write error: $e\n$stack');
-      }
+      await _persistHomeCache();
+    }
+  }
+
+  Future<void> _persistHomeCache() async {
+    try {
+      final data = _HomeCacheData(
+        favorites: _favoriteSongs.value,
+        recentSongs: _recentSongs.value,
+        recentAlbums: _recentAlbums.value,
+        playlists: _playlists.value,
+        recentTracks: _recentTracks.value,
+      );
+      await ApiCacheManager.instance.set(
+        scope: 'home',
+        key: 'dashboard',
+        jsonData: jsonEncode(data.toJson()),
+      );
+    } catch (e, stack) {
+      debugPrint('[HomePage] cache write error: $e\n$stack');
     }
   }
 
   void _preloadHomeCovers() {
     if (!mounted) return;
     final api = FeiNiuApiClient.instance;
-    final headers = FeiNiuApiClient.imageAuthHeaders();
-    final memoryCacheSize = coverMemoryCacheDimensionOf(context, 160);
-    // 预加载首页所有可见封面（最多 40 张）
+    // 只预热首屏附近的封面；其余封面滚动到可见区域时再加载。
     final coverUrls = <String>[
       // Hero Banner 主视觉 — 大尺寸首帧
       if (_heroSong != null &&
@@ -236,7 +317,7 @@ class _HomePageState extends State<HomePage>
           updatedAt: _heroSong!.updatedAt,
         ),
       // 收藏歌曲封面
-      for (final s in _favoriteSongs.value.take(9))
+      for (final s in _favoriteSongs.value.take(2))
         if (s.coverId != null && s.coverId!.isNotEmpty)
           api.coverUrl(
             s.coverId!,
@@ -244,7 +325,7 @@ class _HomePageState extends State<HomePage>
             updatedAt: s.updatedAt,
           ),
       // 最近播放封面
-      for (final s in _recentSongs.value.take(9))
+      for (final s in _recentSongs.value.take(2))
         if (s.coverId != null && s.coverId!.isNotEmpty)
           api.coverUrl(
             s.coverId!,
@@ -252,7 +333,7 @@ class _HomePageState extends State<HomePage>
             updatedAt: s.updatedAt,
           ),
       // 最近添加歌曲封面
-      for (final s in _recentTracks.value.take(9))
+      for (final s in _recentTracks.value.take(2))
         if (s.coverId != null && s.coverId!.isNotEmpty)
           api.coverUrl(
             s.coverId!,
@@ -260,11 +341,11 @@ class _HomePageState extends State<HomePage>
             updatedAt: s.updatedAt,
           ),
       // 专辑封面 — FeiNiuAlbum 无 updatedAt
-      for (final a in _recentAlbums.value.take(10))
+      for (final a in _recentAlbums.value.take(2))
         if (a.coverId != null && a.coverId!.isNotEmpty)
           api.coverUrl(a.coverId!, size: FeiNiuApiClient.coverRequestSize),
       // 歌单封面
-      for (final p in _playlists.value.take(10))
+      for (final p in _playlists.value.take(2))
         if (p.coverId != null && p.coverId!.isNotEmpty)
           api.coverUrl(
             p.coverId!,
@@ -272,26 +353,27 @@ class _HomePageState extends State<HomePage>
             updatedAt: p.updatedAt,
           ),
     ];
-    for (final url in coverUrls) {
-      if (!mounted) break;
-      try {
-        unawaited(
-          precacheImage(
-            ResizeImage.resizeIfNeeded(
-              memoryCacheSize,
-              memoryCacheSize,
-              CachedNetworkImageProvider(url, headers: headers),
-            ),
-            context,
-          ),
-        );
-      } catch (_) {
-        // 外壳可能正在卸载：deactivate 到 unmount 之间的窗口内 State.mounted
-        // 仍为 true（_element 尚未置空），但元素已失活，precacheImage 内部的
-        // DefaultAssetBundle.of(context) 会抛 "Looking up a deactivated
-        // widget's ancestor"。封面预加载是尽力而为的缓存预热，跳过即可。
-      }
-    }
+    _coverPreloads.enqueueAll(coverUrls);
+  }
+
+  Future<void> _preloadCover(String url) async {
+    if (!mounted) return;
+    final memoryCacheSize = coverMemoryCacheDimensionOf(context, 160);
+    // precacheImage 通过 onError 报错；显式转成失败，避免队列记住失败的 URL。
+    Object? loadError;
+    await precacheImage(
+      ResizeImage.resizeIfNeeded(
+        memoryCacheSize,
+        memoryCacheSize,
+        CachedNetworkImageProvider(
+          url,
+          headers: FeiNiuApiClient.imageAuthHeaders(),
+        ),
+      ),
+      context,
+      onError: (error, _) => loadError = error,
+    );
+    if (loadError != null) throw loadError!;
   }
 
   Future<void> _loadRoam() async {
@@ -320,6 +402,7 @@ class _HomePageState extends State<HomePage>
       }
     } catch (e, stack) {
       debugPrint('[HomePage] roam error: $e\n$stack');
+      rethrow;
     }
   }
 
@@ -381,6 +464,7 @@ class _HomePageState extends State<HomePage>
       if (mounted) _favoriteSongs.value = songs;
     } catch (e, stack) {
       debugPrint('[HomePage] favorites error: $e\n$stack');
+      rethrow;
     }
   }
 
@@ -393,6 +477,7 @@ class _HomePageState extends State<HomePage>
       if (mounted) _recentSongs.value = songs;
     } catch (e, stack) {
       debugPrint('[HomePage] history error: $e\n$stack');
+      rethrow;
     }
   }
 
@@ -406,6 +491,7 @@ class _HomePageState extends State<HomePage>
       if (mounted) _recentAlbums.value = pageData.list;
     } catch (e, stack) {
       debugPrint('[HomePage] albums error: $e\n$stack');
+      rethrow;
     }
   }
 
@@ -415,6 +501,7 @@ class _HomePageState extends State<HomePage>
       if (mounted) _playlists.value = pageData.list;
     } catch (e, stack) {
       debugPrint('[HomePage] playlists error: $e\n$stack');
+      rethrow;
     }
   }
 
@@ -431,6 +518,7 @@ class _HomePageState extends State<HomePage>
       if (mounted) _recentTracks.value = songs;
     } catch (e, stack) {
       debugPrint('[HomePage] recent tracks error: $e\n$stack');
+      rethrow;
     }
   }
 
@@ -724,6 +812,15 @@ class _HomePageState extends State<HomePage>
           return RefreshIndicator(
             onRefresh: () => _loadAll(forceRefresh: true),
             child: HomeLargeLayout(
+              sectionFeedback: {
+                for (final section in HomeSection.values)
+                  if (_sectionFeedback(
+                        section,
+                        hasData: _hasSectionData(section),
+                      )
+                      case final Widget feedback)
+                    section: feedback,
+              },
               heroSong: heroSong,
               onPlayRoam: _playRoam,
               onRefreshRoam: _refreshRoam,
@@ -798,6 +895,9 @@ class _HomePageState extends State<HomePage>
                 ? TvLayout.pagePadding()
                 : const EdgeInsets.fromLTRB(20, 8, 20, 160),
             children: [
+              if (_sectionFeedback(HomeSection.roam, hasData: heroSong != null)
+                  case final Widget feedback)
+                feedback,
               // 1. Hero Banner — 漫游/今日推荐，封面是绝对主角
               if (heroSong != null)
                 HomeHeroBanner(
@@ -840,6 +940,18 @@ class _HomePageState extends State<HomePage>
 
               const SizedBox(height: 16),
 
+              if (_sectionFeedback(
+                    HomeSection.history,
+                    hasData: _hasSectionData(HomeSection.history),
+                  )
+                  case final Widget feedback)
+                feedback,
+              if (_sectionFeedback(
+                    HomeSection.favorites,
+                    hasData: _hasSectionData(HomeSection.favorites),
+                  )
+                  case final Widget feedback)
+                feedback,
               // 2. 功能入口 — 收藏 / 最近播放，各带直接播放按钮
               HomeQuickActions(
                 actions: [
@@ -870,6 +982,12 @@ class _HomePageState extends State<HomePage>
 
               const SizedBox(height: 20),
 
+              if (_sectionFeedback(
+                    HomeSection.playlists,
+                    hasData: _hasSectionData(HomeSection.playlists),
+                  )
+                  case final Widget feedback)
+                feedback,
               // 3. 我的歌单 — 横向封面轮播（尺寸小于专辑）
               if (_playlists.value.isNotEmpty) ...[
                 HomeSectionHeader(title: '我的歌单', onViewAll: _openPlaylistsPage),
@@ -892,6 +1010,12 @@ class _HomePageState extends State<HomePage>
                 const SizedBox(height: 16),
               ],
 
+              if (_sectionFeedback(
+                    HomeSection.tracks,
+                    hasData: _hasSectionData(HomeSection.tracks),
+                  )
+                  case final Widget feedback)
+                feedback,
               // 4. 最新歌曲 — 紧凑竖排行列表
               if (_recentTracks.value.isNotEmpty) ...[
                 HomeSectionHeader(title: '最新歌曲', onViewAll: _openSongsPage),
@@ -907,6 +1031,12 @@ class _HomePageState extends State<HomePage>
                 const SizedBox(height: 16),
               ],
 
+              if (_sectionFeedback(
+                    HomeSection.albums,
+                    hasData: _hasSectionData(HomeSection.albums),
+                  )
+                  case final Widget feedback)
+                feedback,
               // 5. 最新专辑 — 横向大封面轮播
               if (_recentAlbums.value.isNotEmpty) ...[
                 HomeSectionHeader(
@@ -934,7 +1064,12 @@ class _HomePageState extends State<HomePage>
               ],
 
               // 空状态
-              if (_favoriteSongs.value.isEmpty &&
+              if (_pendingSections.value.isEmpty &&
+                  _failedSections.value.isEmpty &&
+                  _playlists.value.isEmpty &&
+                  _recentTracks.value.isEmpty &&
+                  _heroSong == null &&
+                  _favoriteSongs.value.isEmpty &&
                   _recentSongs.value.isEmpty &&
                   _recentAlbums.value.isEmpty)
                 const _HomeEmptyState(text: '还没有数据，下拉刷新试试'),

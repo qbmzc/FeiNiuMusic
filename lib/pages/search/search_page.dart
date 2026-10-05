@@ -1,6 +1,8 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 
 import '../../app/services/feiniu/api_client.dart';
@@ -40,6 +42,8 @@ class _SearchPageState extends State<SearchPage> {
   String _query = '';
   bool _searching = false;
   int _searchToken = 0;
+  Timer? _searchDebounce;
+  CancelToken? _searchCancelToken;
 
   // 搜索结果
   List<SongEntity> _songs = [];
@@ -48,11 +52,32 @@ class _SearchPageState extends State<SearchPage> {
 
   @override
   void dispose() {
+    _searchDebounce?.cancel();
+    _searchCancelToken?.cancel();
+    _searchToken++;
     _controller.dispose();
     super.dispose();
   }
 
+  void _scheduleSearch(String value) {
+    _searchDebounce?.cancel();
+    _searchCancelToken?.cancel();
+    _searchToken++;
+    setState(() {
+      _query = value;
+      _songs = [];
+      _albums = [];
+      _artists = [];
+      _searching = value.trim().isNotEmpty;
+    });
+    if (value.trim().isEmpty) return;
+    _searchDebounce = Timer(const Duration(milliseconds: 300), _runSearch);
+  }
+
   Future<void> _runSearch() async {
+    _searchDebounce?.cancel();
+    _searchCancelToken?.cancel();
+    final token = ++_searchToken;
     final q = _query.trim();
     if (q.isEmpty) {
       setState(() {
@@ -64,7 +89,8 @@ class _SearchPageState extends State<SearchPage> {
       return;
     }
 
-    final token = ++_searchToken;
+    final cancelToken = CancelToken();
+    _searchCancelToken = cancelToken;
     setState(() {
       _searching = true;
     });
@@ -72,9 +98,14 @@ class _SearchPageState extends State<SearchPage> {
     try {
       // 并行请求三个搜索接口
       final results = await Future.wait([
-        _api.searchTrack(query: q, page: 1, size: 50),
-        _api.searchAlbum(query: q, page: 1, size: 24),
-        _api.searchArtist(query: q, page: 1, size: 24),
+        _api.searchTrack(query: q, page: 1, size: 50, cancelToken: cancelToken),
+        _api.searchAlbum(query: q, page: 1, size: 24, cancelToken: cancelToken),
+        _api.searchArtist(
+          query: q,
+          page: 1,
+          size: 24,
+          cancelToken: cancelToken,
+        ),
       ]);
 
       if (!mounted || token != _searchToken) return;
@@ -96,8 +127,13 @@ class _SearchPageState extends State<SearchPage> {
         _artists = artistPage.list;
         _searching = false;
       });
-    } catch (e) {
-      if (!mounted || token != _searchToken) return;
+    } catch (e, stack) {
+      if (!mounted ||
+          token != _searchToken ||
+          (e is DioException && CancelToken.isCancel(e))) {
+        return;
+      }
+      debugPrint('[SearchPage] search failed: $e\n$stack');
       setState(() {
         _songs = [];
         _albums = [];
@@ -112,9 +148,9 @@ class _SearchPageState extends State<SearchPage> {
 
   /// 拉取「已加载页之后」的第 [page] 页搜索结果（供填充播放使用）。
   /// 当前 _songs 已是第 1 页，填充从第 2 页起。
-  Future<List<SongEntity>> _fetchSearchPage(int page) async {
+  Future<List<SongEntity>> _fetchSearchPage(int page, String query) async {
     final pageData = await _api.searchTrack(
-      query: _query,
+      query: query,
       page: page + 1,
       size: 50,
     );
@@ -129,7 +165,12 @@ class _SearchPageState extends State<SearchPage> {
   /// 播放搜索结果：首屏 50 首不足队列上限时，自动分页拉取更多搜索结果填充。
   void _playSong(int index) {
     if (_songs.isEmpty) return;
-    _player.playQueueFilledToLimit(_songs, index, fetchMore: _fetchSearchPage);
+    final query = _query.trim();
+    _player.playQueueFilledToLimit(
+      _songs,
+      index,
+      fetchMore: (page) => _fetchSearchPage(page, query),
+    );
   }
 
   @override
@@ -162,12 +203,7 @@ class _SearchPageState extends State<SearchPage> {
                 controller: _controller,
                 // 进入搜索页自动聚焦，可直接输入。
                 autofocus: true,
-                onChanged: (value) {
-                  setState(() {
-                    _query = value;
-                  });
-                  _runSearch();
-                },
+                onChanged: _scheduleSearch,
                 textInputAction: TextInputAction.search,
                 decoration: InputDecoration(
                   hintText: '搜索',
@@ -177,11 +213,8 @@ class _SearchPageState extends State<SearchPage> {
                       : IconButton(
                           icon: const Icon(Icons.clear),
                           onPressed: () {
-                            setState(() {
-                              _query = '';
-                              _controller.clear();
-                            });
-                            _runSearch();
+                            _controller.clear();
+                            _scheduleSearch('');
                           },
                         ),
                   filled: true,
@@ -348,7 +381,10 @@ class _SearchPageState extends State<SearchPage> {
               children: _albums.map((album) {
                 final coverUrl =
                     album.coverId != null && album.coverId!.isNotEmpty
-                    ? _api.coverUrl(album.coverId!, size: FeiNiuApiClient.coverRequestSize)
+                    ? _api.coverUrl(
+                        album.coverId!,
+                        size: FeiNiuApiClient.coverRequestSize,
+                      )
                     : null;
                 return ListTile(
                   leading: coverUrl != null
@@ -397,7 +433,10 @@ class _SearchPageState extends State<SearchPage> {
               children: _artists.map((artist) {
                 final coverUrl =
                     artist.coverId != null && artist.coverId!.isNotEmpty
-                    ? _api.coverUrl(artist.coverId!, size: FeiNiuApiClient.coverRequestSize)
+                    ? _api.coverUrl(
+                        artist.coverId!,
+                        size: FeiNiuApiClient.coverRequestSize,
+                      )
                     : null;
                 return ListTile(
                   leading: CircleAvatar(

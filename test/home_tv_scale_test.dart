@@ -9,6 +9,7 @@ import 'package:feiniu_music/components/layout/side_menu.dart';
 import 'package:feiniu_music/pages/home/widgets/home_large_layout.dart';
 import 'package:feiniu_music/pages/home/widgets/home_hero_banner.dart';
 import 'package:feiniu_music/pages/home/widgets/home_shortcut_menu.dart';
+import 'package:feiniu_music/pages/home/widgets/home_section_feedback.dart';
 
 void _noop() {}
 
@@ -19,7 +20,8 @@ const _song = SongEntity(
   durationMs: 123000,
 );
 
-Widget _home() => HomeLargeLayout(
+Widget _home({Map<HomeSection, Widget> feedback = const {}}) => HomeLargeLayout(
+  sectionFeedback: feedback,
   heroSong: _song,
   onPlayRoam: _noop,
   onRefreshRoam: _noop,
@@ -171,5 +173,59 @@ void main() {
     expect(played, isTrue);
     expect(refreshed, isTrue);
     expect(tester.takeException(), isNull);
+  });
+  testWidgets('200% 与系统大字体下模块加载和重试提示无溢出', (tester) async {
+    tester.view.physicalSize = const Size(800, 480);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(
+      MaterialApp(
+        builder: (context, child) => MediaQuery(
+          data: MediaQuery.of(
+            context,
+          ).copyWith(textScaler: TextScaler.linear(1.5)),
+          child: child!,
+        ),
+        home: Scaffold(
+          body: SizedBox(
+            width: 440,
+            child: _home(
+              feedback: {
+                for (final section in HomeSection.values)
+                  section: HomeSectionFeedback(
+                    section: section,
+                    loading: section == HomeSection.roam,
+                    onRetry: _noop,
+                  ),
+              },
+            ),
+          ),
+        ),
+      ),
+    );
+    expect(tester.takeException(), isNull);
+    final homeScroll = find
+        .descendant(
+          of: find.byType(HomeLargeLayout),
+          matching: find.byType(Scrollable),
+        )
+        .first;
+    for (final label in ['我的歌单加载失败', '最新专辑加载失败']) {
+      // 首页歌曲区有自己的滚动列表，直接推进外层位置以检查页面各模块。
+      final position = tester.state<ScrollableState>(homeScroll).position;
+      for (var i = 0; i < 50 && find.text(label).evaluate().isEmpty; i++) {
+        position.jumpTo(
+          (position.pixels + 400).clamp(0, position.maxScrollExtent),
+        );
+        await tester.pump();
+      }
+      expect(find.text(label), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    }
+    for (var i = 0; i < 24; i++) {
+      await tester.drag(homeScroll, const Offset(0, -500));
+      await tester.pump();
+      expect(tester.takeException(), isNull);
+    }
   });
 }
