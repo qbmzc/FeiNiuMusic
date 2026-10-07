@@ -55,69 +55,112 @@ Future<void> _pump(WidgetTester tester) async {
 }
 
 void main() {
-  testWidgets(
-    'fast modules render before a slow module; refresh shares in-flight work',
-    (tester) async {
-      SharedPreferences.setMockInitialValues({});
-      AppLayoutSettings.resetForTest();
-      sqfliteFfiInit();
-      databaseFactory = databaseFactoryFfiNoIsolate;
-      DbHelper.instance.resetForTest(overridePath: inMemoryDatabasePath);
-      await tester.runAsync(() async {
-        await DbHelper.instance.database;
-      });
-      addTearDown(() => DbHelper.instance.resetForTest());
-      tester.view.physicalSize = const Size(800, 1200);
-      tester.view.devicePixelRatio = 1;
-      addTearDown(tester.view.reset);
-      final requests = <_Request>[];
-      final dio = Dio();
-      dio.interceptors.add(
-        InterceptorsWrapper(
-          onRequest: (options, handler) {
-            final request = _Request(options, handler);
-            requests.add(request);
-            if (options.path.endsWith(_albumPath)) return;
-            request.resolve(
-              options.path.endsWith('/track/list')
-                  ? [
-                      {
-                        'guid': 'fast',
-                        'title': '先返回的歌曲',
-                        'album': <String, dynamic>{},
-                        'artists': [],
-                      },
-                    ]
-                  : [],
-            );
-          },
-        ),
-      );
-      FeiNiuApiClient.instance.setDioForTest(dio);
-      await FeiNiuApiClient.instance.setAuth('http://nas.test', 'token');
-      await tester.pumpWidget(const MaterialApp(home: HomePage()));
-      await _pump(tester);
-      expect(find.text('先返回的歌曲'), findsOneWidget);
-      expect(find.text('最新专辑加载中…'), findsOneWidget);
-      final refresh = tester.widget<RefreshIndicator>(
-        find.byType(RefreshIndicator),
-      );
-      final refreshing = refresh.onRefresh();
-      await _pump(tester);
-      expect(
-        requests.where((r) => r.options.path.endsWith(_albumPath)),
-        hasLength(1),
-      );
-      requests
-          .singleWhere((r) => r.options.path.endsWith(_albumPath))
-          .resolve([]);
-      await _pump(tester);
-      await refreshing;
-      expect(find.text('最新专辑加载中…'), findsNothing);
-      expect(tester.takeException(), isNull);
-      await tester.pumpWidget(const SizedBox());
-    },
-  );
+  for (final disposeDuringLoad in [false, true]) {
+    testWidgets(
+      disposeDuringLoad
+          ? 'disposing home skips a queued forced refresh'
+          : 'forced refreshes during loading coalesce and update completed modules',
+      (tester) async {
+        SharedPreferences.setMockInitialValues({});
+        AppLayoutSettings.resetForTest();
+        sqfliteFfiInit();
+        databaseFactory = databaseFactoryFfiNoIsolate;
+        DbHelper.instance.resetForTest(overridePath: inMemoryDatabasePath);
+        await tester.runAsync(() async {
+          await DbHelper.instance.database;
+        });
+        addTearDown(() => DbHelper.instance.resetForTest());
+        tester.view.physicalSize = const Size(800, 1200);
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.reset);
+        final requests = <_Request>[];
+        var trackTitle = '先返回的歌曲';
+        final dio = Dio();
+        dio.interceptors.add(
+          InterceptorsWrapper(
+            onRequest: (options, handler) {
+              final request = _Request(options, handler);
+              requests.add(request);
+              if (options.path.endsWith(_albumPath)) return;
+              request.resolve(
+                options.path.endsWith('/track/list')
+                    ? [
+                        {
+                          'guid': 'fast',
+                          'title': trackTitle,
+                          'album': <String, dynamic>{},
+                          'artists': [],
+                        },
+                      ]
+                    : [],
+              );
+            },
+          ),
+        );
+        FeiNiuApiClient.instance.setDioForTest(dio);
+        await FeiNiuApiClient.instance.setAuth('http://nas.test', 'token');
+        await tester.pumpWidget(const MaterialApp(home: HomePage()));
+        await _pump(tester);
+        expect(find.text('先返回的歌曲'), findsOneWidget);
+        expect(find.text('最新专辑加载中…'), findsOneWidget);
+        final refresh = tester.widget<RefreshIndicator>(
+          find.byType(RefreshIndicator),
+        );
+        trackTitle = '修改后的歌曲';
+        var refreshCompleted = false;
+        final refreshing = refresh.onRefresh().then((_) {
+          refreshCompleted = true;
+        });
+        final secondRefreshing = refresh.onRefresh();
+        await _pump(tester);
+        expect(
+          requests.where((r) => r.options.path.endsWith(_albumPath)),
+          hasLength(1),
+        );
+        if (disposeDuringLoad) {
+          final requestCount = requests.length;
+          await tester.pumpWidget(const SizedBox());
+          requests
+              .singleWhere((r) => r.options.path.endsWith(_albumPath))
+              .resolve([]);
+          await _pump(tester);
+          await refreshing;
+          await secondRefreshing;
+          expect(requests, hasLength(requestCount));
+          expect(tester.takeException(), isNull);
+          return;
+        }
+        requests
+            .singleWhere((r) => r.options.path.endsWith(_albumPath))
+            .resolve([]);
+        await _pump(tester);
+        expect(find.text('修改后的歌曲'), findsOneWidget);
+        expect(find.text('先返回的歌曲'), findsNothing);
+        expect(refreshCompleted, isFalse);
+        final albumRequests = requests
+            .where((r) => r.options.path.endsWith(_albumPath))
+            .toList();
+        expect(albumRequests, hasLength(2));
+        albumRequests.last.resolve([]);
+        await _pump(tester);
+        await refreshing;
+        await secondRefreshing;
+        expect(refreshCompleted, isTrue);
+        expect(
+          requests.where((r) => r.options.path.endsWith('/track/list')),
+          hasLength(2),
+        );
+        final saved = await tester.runAsync(
+          () => ApiCacheManager.instance.getPersisted('home', 'dashboard'),
+        );
+        expect(saved, contains('修改后的歌曲'));
+        expect(saved, isNot(contains('先返回的歌曲')));
+        expect(find.text('最新专辑加载中…'), findsNothing);
+        expect(tester.takeException(), isNull);
+        await tester.pumpWidget(const SizedBox());
+      },
+    );
+  }
 
   testWidgets(
     'failed module retains cached content and retries only that module',

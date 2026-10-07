@@ -114,6 +114,7 @@ class _HomePageState extends State<HomePage>
   late final _pendingSections = createSignal<Set<HomeSection>>({});
   late final _failedSections = createSignal<Set<HomeSection>>({});
   Future<void>? _loadFuture;
+  bool _refreshRequested = false;
   final Map<HomeSection, Future<void>> _sectionLoads = {};
   late final CoverPreloadQueue _coverPreloads = CoverPreloadQueue(
     load: _preloadCover,
@@ -153,9 +154,24 @@ class _HomePageState extends State<HomePage>
   }
 
   Future<void> _loadAll({bool forceRefresh = false}) {
-    return _loadFuture ??= _loadDashboard(
+    if (!mounted) return Future.value();
+    final loading = _loadFuture;
+    if (loading != null) {
+      if (forceRefresh) _refreshRequested = true;
+      return loading;
+    }
+    return _loadFuture = _loadDashboardUntilFresh(
       forceRefresh: forceRefresh,
     ).whenComplete(() => _loadFuture = null);
+  }
+
+  Future<void> _loadDashboardUntilFresh({required bool forceRefresh}) async {
+    do {
+      // 同一轮中的强制刷新合并为下一轮，调用方等待补刷和缓存写入完成。
+      _refreshRequested = false;
+      await _loadDashboard(forceRefresh: forceRefresh);
+      forceRefresh = true;
+    } while (mounted && _refreshRequested);
   }
 
   Future<void> _loadSection(HomeSection section) {
