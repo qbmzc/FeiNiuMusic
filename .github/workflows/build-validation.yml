@@ -1,0 +1,102 @@
+name: build-validation
+run-name: build-validation @ ${{ github.sha }}
+
+on:
+  push:
+    branches:
+      - perf/search-home-loading-20261004
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-validation-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # 与正式构建使用同一 Flutter 版本。
+  FLUTTER_VERSION: c97838627ff5c275e9788839d427ab03eb1dfa01
+
+jobs:
+  build-android:
+    if: github.repository == 'qbmzc/FeiNiuMusic'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: main
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          cache: true
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - run: flutter pub get
+      # DLNA 插件编译依赖 android-arm/flutter.jar，需预下载全部 Android 引擎。
+      - run: flutter precache --android
+      # 不注入正式签名，使用项目已有的 debug 签名回退，仅用于安装测试。
+      - name: Build release APKs with debug signing
+        run: flutter build apk --release --split-per-abi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: validation-android-debug-signed-${{ github.sha }}
+          path: build/app/outputs/flutter-apk/app-*-release.apk
+          if-no-files-found: error
+          retention-days: 14
+
+  build-windows:
+    if: github.repository == 'qbmzc/FeiNiuMusic'
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure Git for Flutter SDK checkout
+        shell: pwsh
+        run: |
+          git config --global core.longpaths true
+          git config --global core.symlinks false
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: main
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          cache: true
+      - run: flutter pub get
+      - name: Build and package Windows
+        shell: pwsh
+        run: .\scripts\package_windows.ps1 -Build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: validation-windows-${{ github.sha }}
+          path: build/installer/FeiNiuMusic-v*-Windows.zip
+          if-no-files-found: error
+          retention-days: 14
+
+  build-macos:
+    if: github.repository == 'qbmzc/FeiNiuMusic'
+    runs-on: macos-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: main
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          cache: true
+      - run: flutter pub get
+      - run: flutter build macos --release
+      - name: Package macOS app
+        run: |
+          ditto -c -k --sequesterRsrc --keepParent \
+            "build/macos/Build/Products/Release/飞牛音乐.app" \
+            "FeiNiuMusic-validation-MacOS.zip"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: validation-macos-${{ github.sha }}
+          path: FeiNiuMusic-validation-MacOS.zip
+          if-no-files-found: error
+          retention-days: 14
