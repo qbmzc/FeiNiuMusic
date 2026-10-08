@@ -9,7 +9,9 @@ import '../../../app/services/lyrics/lyrics_service.dart';
 import '../../../app/services/lyrics/lyrics_view_colors.dart';
 import '../../../app/services/player_service.dart';
 import '../../../app/state/settings_state.dart';
+import '../../../app/tv/tv_layout.dart';
 import '../../../components/index.dart';
+import '../tv_player_scale.dart';
 import '../widgets/player_bottom_panel.dart';
 import 'widgets/lyrics_actions_bar.dart';
 import 'widgets/lyrics_drag_to_seek.dart';
@@ -545,10 +547,10 @@ class _PlayerLyricsViewState extends State<PlayerLyricsView> with SignalsMixin {
         final dragSeek = _dragSeek.value;
         final showTranslation = _showTranslation.value;
         final forceKaraoke = _forceKaraoke.value;
-        // TV 端（3 米外观看）按比例放大歌词字号：默认 16/20 → 22/28，
-        // 行距同步放大。滑块仍显示原始数值（用户设置不变，仅渲染缩放）。
-        final isTv = AppLayoutSettings.tvMode.value;
-        final fontSizeScale = isTv ? 1.4 : 1.0;
+        final fontSizeScale =
+            AppLayoutSettings.tvMode.value && !TvPlayerScale.contains(context)
+            ? TvLayout.uiScale(context)
+            : 1.0;
         final rawFontSize = _fontSize.value;
         final rawActiveFontSize = _activeFontSize.value;
         final configuredFontFamily = _fontFamily.value.trim();

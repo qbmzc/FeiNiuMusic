@@ -24,6 +24,7 @@ import 'widgets/player_bottom_panel.dart';
 import 'widgets/player_header.dart';
 import 'widgets/player_favorite_button.dart';
 import 'tv_player_focus_scope.dart';
+import 'tv_player_scale.dart';
 
 class PlayerPage extends StatefulWidget {
   const PlayerPage({super.key});
@@ -355,7 +356,7 @@ class _PlayerPageState extends State<PlayerPage>
       onTogglePlayPause: () => _player.togglePlayPause(),
       onPrevious: _player.previous,
       onNext: _player.next,
-      child: page,
+      child: TvPlayerScale(child: page),
     );
   }
 }

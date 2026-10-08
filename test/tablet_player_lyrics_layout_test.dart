@@ -21,6 +21,34 @@ void main() {
   });
   tearDown(() => AppLayoutSettings.resetForTest());
 
+  for (final size in [const Size(1280, 720), const Size(1920, 1080)]) {
+    testWidgets('车机播放页：${size.width} 宽屏跟随 200% 缩放且无溢出', (tester) async {
+      tester.view.physicalSize = size;
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+      AppLayoutSettings.tvMode.value = true;
+      await AppLayoutSettings.setTvUiScaleOverride(1.0);
+
+      await tester.pumpWidget(const MaterialApp(home: PlayerPage()));
+      await tester.pump(const Duration(milliseconds: 400));
+      final lyrics = find.byType(PlayerLyricsView);
+      final initialContext = tester.element(lyrics);
+      expect(MediaQuery.sizeOf(initialContext), size);
+      expect(tester.takeException(), isNull);
+
+      await AppLayoutSettings.setTvUiScaleOverride(2.0);
+      await tester.pump();
+      expect(MediaQuery.sizeOf(tester.element(lyrics)), size / 2);
+      expect(tester.takeException(), isNull);
+      expect(find.byIcon(Icons.play_arrow_rounded), findsOneWidget);
+      final playRect = tester.getRect(find.byIcon(Icons.play_arrow_rounded));
+      expect(playRect.overlaps(Offset.zero & size), isTrue);
+
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pump();
+    });
+  }
+
   testWidgets('平板横屏：歌词块从顶部铺满（无重复 header 留白）', (tester) async {
     // 10 英寸平板横屏：逻辑 1280×800。
     tester.view.physicalSize = const Size(1280, 800);

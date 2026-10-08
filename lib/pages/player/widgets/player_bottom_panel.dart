@@ -378,14 +378,13 @@ class PlayerControls extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final isTv = AppLayoutSettings.tvMode.value;
     final iconColor = scheme.primary.withValues(alpha: 0.86);
     final buttonBg = scheme.primaryContainer.withValues(alpha: 0.92);
     final mainButtonSize = compact
         ? 48.0
         : switch (stylePreset) {
-            PlayerStylePreset.poster => isTv ? 88.0 : 72.0,
-            PlayerStylePreset.classic => isTv ? 80.0 : 64.0,
+            PlayerStylePreset.poster => 72.0,
+            PlayerStylePreset.classic => 64.0,
           };
     return Watch.builder(
       builder: (context) {
@@ -395,11 +394,11 @@ class PlayerControls extends StatelessWidget {
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             IconButton(
-              iconSize: compact ? 36 : (isTv ? 64 : 48),
+              iconSize: compact ? 36 : 48,
               icon: Icon(Icons.skip_previous_rounded, color: iconColor),
               onPressed: player.previous,
             ),
-            SizedBox(width: compact ? 12 : (isTv ? 28 : 20)),
+            SizedBox(width: compact ? 12 : 20),
             Container(
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
@@ -429,7 +428,7 @@ class PlayerControls extends StatelessWidget {
             ),
             SizedBox(width: compact ? 12 : 20),
             IconButton(
-              iconSize: compact ? 36 : (isTv ? 64 : 48),
+              iconSize: compact ? 36 : 48,
               icon: Icon(Icons.skip_next_rounded, color: iconColor),
               onPressed: player.next,
             ),
