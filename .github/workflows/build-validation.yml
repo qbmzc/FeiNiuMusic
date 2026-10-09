@@ -95,6 +95,7 @@ jobs:
             -workspace macos/Runner.xcworkspace \
             -scheme Runner \
             -configuration Debug \
+            -derivedDataPath build/macos \
             -destination 'platform=macOS' \
             -parallel-testing-enabled NO \
             -only-testing:RunnerTests \
