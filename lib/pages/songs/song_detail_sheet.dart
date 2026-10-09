@@ -6,7 +6,6 @@ import 'package:flutter/material.dart';
 
 import '../../app/router/app_page_route.dart';
 import '../../app/services/feiniu/api_client.dart';
-import '../../app/services/feiniu/favorite_service.dart';
 import '../../app/services/feiniu/transcode_service.dart';
 import '../../app/services/player/player_engine.dart';
 import '../../app/services/player_service.dart';
@@ -53,11 +52,6 @@ class SongDetailSheet extends StatefulWidget {
 }
 
 class _SongDetailSheetState extends State<SongDetailSheet> {
-  final FeiNiuFavoriteService _favoriteService =
-      FeiNiuFavoriteService.instance;
-  bool _isFavorite = false;
-  bool _loadingFavorite = true;
-
   @override
   void initState() {
     super.initState();
@@ -71,7 +65,6 @@ class _SongDetailSheetState extends State<SongDetailSheet> {
     });
     AppPlaybackVolumeSettings.ensureLoaded();
     AppPlaybackSpeedSettings.ensureLoaded();
-    _loadFavoriteState();
   }
 
   @override
@@ -84,43 +77,12 @@ class _SongDetailSheetState extends State<SongDetailSheet> {
     super.dispose();
   }
 
-  Future<void> _loadFavoriteState() async {
-    try {
-      final isFav = await _favoriteService.isFavorite(widget.song.id);
-      if (!mounted) return;
-      setState(() {
-        _isFavorite = isFav;
-        _loadingFavorite = false;
-      });
-    } catch (_) {
-      if (!mounted) return;
-      setState(() => _loadingFavorite = false);
-    }
-  }
-
-  Future<void> _toggleFavorite() async {
-    if (_loadingFavorite) return;
-    try {
-      if (_isFavorite) {
-        await _favoriteService.unfavorite(widget.song.id);
-        if (!mounted) return;
-        setState(() => _isFavorite = false);
-        AppToast.show(context, '已取消收藏');
-      } else {
-        await _favoriteService.favorite(widget.song.id);
-        if (!mounted) return;
-        setState(() => _isFavorite = true);
-        AppToast.show(context, '已收藏');
-      }
-    } catch (e) {
-      if (!mounted) return;
-      AppToast.show(context, '操作失败', type: ToastType.error);
-    }
-  }
-
   /// 点击解码 tag：弹出二选一解码器选择。选定后切换当前歌曲的解码引擎并关掉
   /// 面板（重载期间避免拖其他控件）。
-  Future<void> _showDecoderPicker(BuildContext context, EngineKind current) async {
+  Future<void> _showDecoderPicker(
+    BuildContext context,
+    EngineKind current,
+  ) async {
     final selected = await showModalBottomSheet<EngineKind>(
       context: context,
       backgroundColor: Colors.transparent,
@@ -141,9 +103,7 @@ class _SongDetailSheetState extends State<SongDetailSheet> {
       context: context,
       backgroundColor: Colors.transparent,
       isScrollControlled: true,
-      builder: (_) => _TranscodeFormatPickerSheet(
-        song: widget.song,
-      ),
+      builder: (_) => _TranscodeFormatPickerSheet(song: widget.song),
     );
     // null = 关闭面板（未选择）
     if (selected == null || !mounted) return;
@@ -230,15 +190,6 @@ class _SongDetailSheetState extends State<SongDetailSheet> {
                       ],
                     ),
                   ),
-                  IconButton(
-                    icon: Icon(
-                      _isFavorite
-                          ? Icons.favorite_rounded
-                          : Icons.favorite_border_rounded,
-                      color: _isFavorite ? theme.colorScheme.error : null,
-                    ),
-                    onPressed: _loadingFavorite ? null : _toggleFavorite,
-                  ),
                 ],
               ),
             ),
@@ -281,9 +232,7 @@ class _SongDetailSheetState extends State<SongDetailSheet> {
                 final nav = Navigator.of(context);
                 nav.pop(); // 关闭详情 sheet
                 final updated = await nav.push<SongEntity>(
-                  buildAppPageRoute(
-                    (_) => SongEditPage(song: widget.song),
-                  ),
+                  buildAppPageRoute((_) => SongEditPage(song: widget.song)),
                 );
                 if (updated != null) {
                   // 激活回调刷新列表 + 更新当前播放/队列
@@ -292,8 +241,7 @@ class _SongDetailSheetState extends State<SongDetailSheet> {
                 }
               },
             ),
-            if (widget.extraActions != null)
-              ...widget.extraActions!,
+            if (widget.extraActions != null) ...widget.extraActions!,
             if (widget.onOpenPlayerAppearanceSettings != null)
               AppListTile(
                 leading: const Icon(Icons.tune_rounded),
@@ -377,7 +325,8 @@ class _SongDetailSheetState extends State<SongDetailSheet> {
                               engine: engine,
                               // 桌面端只有 media_kit（FFmpeg）引擎，
                               // 禁止手动切到 just_audio（无实现）。
-                              onTap: Platform.isWindows ||
+                              onTap:
+                                  Platform.isWindows ||
                                       Platform.isMacOS ||
                                       Platform.isLinux
                                   ? null
@@ -401,8 +350,11 @@ class _SongDetailSheetState extends State<SongDetailSheet> {
 
   Widget _buildCover(ThemeData theme, SongEntity song) {
     if (song.coverId != null && song.coverId!.isNotEmpty) {
-      final coverUrl =
-          FeiNiuApiClient.instance.coverUrl(song.coverId!, size: FeiNiuApiClient.coverRequestSize, updatedAt: song.updatedAt);
+      final coverUrl = FeiNiuApiClient.instance.coverUrl(
+        song.coverId!,
+        size: FeiNiuApiClient.coverRequestSize,
+        updatedAt: song.updatedAt,
+      );
       return CachedNetworkImage(
         imageUrl: coverUrl,
         httpHeaders: FeiNiuApiClient.imageAuthHeaders(),
@@ -447,9 +399,10 @@ class _AppVolumeControl extends StatelessWidget {
     final colors = Theme.of(context).colorScheme;
     // 与下方 AppListTile 的标题对齐：同用 ListTileTheme 的 contentPadding，
     // leading（图标宽 24）与标题之间留 16（ListTile 默认 horizontalTitleGap）。
-    final tilePadding = ListTileTheme.of(context).contentPadding?.resolve(
-          Directionality.of(context),
-        ) ??
+    final tilePadding =
+        ListTileTheme.of(
+          context,
+        ).contentPadding?.resolve(Directionality.of(context)) ??
         const EdgeInsets.symmetric(horizontal: 16);
     return Padding(
       padding: EdgeInsets.only(
@@ -538,9 +491,10 @@ class _PlaybackSpeedControl extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
     // 与下方 AppListTile 的标题对齐：同用 ListTileTheme 的 contentPadding。
-    final tilePadding = ListTileTheme.of(context).contentPadding?.resolve(
-          Directionality.of(context),
-        ) ??
+    final tilePadding =
+        ListTileTheme.of(
+          context,
+        ).contentPadding?.resolve(Directionality.of(context)) ??
         const EdgeInsets.symmetric(horizontal: 16);
     return Padding(
       padding: EdgeInsets.only(

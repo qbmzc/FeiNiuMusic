@@ -841,9 +841,7 @@ class _PosterArtwork extends StatelessWidget {
                 top: topPad + 8,
                 right: 12,
                 child: Material(
-                  color: Theme.of(
-                    context,
-                  ).colorScheme.surface.withValues(alpha: 0.72),
+                  color: Colors.transparent,
                   shape: const CircleBorder(),
                   child: CastButton(songSignal: songSignal),
                 ),
