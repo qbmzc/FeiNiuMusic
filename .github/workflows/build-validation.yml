@@ -88,6 +88,17 @@ jobs:
           flutter-version: ${{ env.FLUTTER_VERSION }}
           cache: true
       - run: flutter pub get
+      - name: Test macOS Dock window restoration
+        run: |
+          flutter build macos --debug
+          xcodebuild test \
+            -workspace macos/Runner.xcworkspace \
+            -scheme Runner \
+            -configuration Debug \
+            -destination 'platform=macOS' \
+            -parallel-testing-enabled NO \
+            -only-testing:RunnerTests \
+            CODE_SIGNING_ALLOWED=NO
       - run: flutter build macos --release
       - name: Package macOS app
         run: |

@@ -25,12 +25,19 @@ class AppDelegate: FlutterAppDelegate {
     _ sender: NSApplication,
     hasVisibleWindows flag: Bool
   ) -> Bool {
-    // 菜单栏状态关闭或原生通道尚未同步时仍保留 Dock 恢复入口，避免主窗口
-    // 被 orderOut/close 后无法重新打开。
-    if !flag {
-      mainFlutterWindow?.makeKeyAndOrderFront(nil)
+    // flag 也包含桌面歌词等子窗口，不能据此判断主窗口是否需要恢复。
+    guard let window = mainFlutterWindow else { return true }
+    if window.isMiniaturized {
+      window.deminiaturize(nil)
     }
-    return true
+    window.makeKeyAndOrderFront(nil)
+    if #available(macOS 14.0, *) {
+      sender.activate()
+    } else {
+      sender.activate(ignoringOtherApps: true)
+    }
+    // 已明确恢复主窗口，不再让 AppKit 执行默认的窗口选择逻辑。
+    return false
   }
 
   override func applicationSupportsSecureRestorableState(_ app: NSApplication) -> Bool {
