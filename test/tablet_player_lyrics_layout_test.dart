@@ -4,6 +4,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:feiniu_music/app/services/player_service.dart';
 import 'package:feiniu_music/app/state/settings_layout_state.dart';
+import 'package:feiniu_music/app/tv/tv_ui_scale.dart';
 import 'package:feiniu_music/pages/player/player_page.dart';
 import 'package:feiniu_music/pages/player/lyrics/lyric_view.dart';
 import 'package:feiniu_music/pages/player/widgets/player_bottom_panel.dart';
@@ -29,7 +30,12 @@ void main() {
       AppLayoutSettings.tvMode.value = true;
       await AppLayoutSettings.setTvUiScaleOverride(1.0);
 
-      await tester.pumpWidget(const MaterialApp(home: PlayerPage()));
+      await tester.pumpWidget(
+        MaterialApp(
+          builder: (context, child) => TvUiScale(child: child!),
+          home: const PlayerPage(),
+        ),
+      );
       await tester.pump(const Duration(milliseconds: 400));
       final lyrics = find.byType(PlayerLyricsView);
       final initialContext = tester.element(lyrics);

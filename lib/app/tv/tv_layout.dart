@@ -1,6 +1,7 @@
 import 'package:flutter/widgets.dart';
 
 import '../state/settings_layout_state.dart';
+import 'tv_grid_delegate.dart';
 
 /// TV 端布局辅助（10-foot UI）。
 ///
@@ -11,18 +12,52 @@ class TvLayout {
   /// 高逻辑分辨率屏幕上的车机界面按屏幕短边适度放大。
   /// 以 720dp 为基准，限制上限避免 4K 屏幕上的控件过大。
   static double recommendedUiScale(BuildContext context) {
-    final shortestSide = MediaQuery.sizeOf(context).shortestSide;
+    final shortestSide =
+        (TvUiScaleScope.maybeOf(context)?.unscaledSize ??
+                MediaQuery.sizeOf(context))
+            .shortestSide;
     return (shortestSide / 720).clamp(1.0, 1.3);
   }
 
-  static double uiScale(BuildContext context) =>
+  static double configuredUiScale(BuildContext context) =>
       AppLayoutSettings.tvUiScaleOverride.value ?? recommendedUiScale(context);
+
+  /// Existing component size multipliers are unnecessary inside the app scale.
+  static double uiScale(BuildContext context) =>
+      TvUiScaleScope.maybeOf(context) == null
+      ? configuredUiScale(context)
+      : 1.0;
 
   /// TV 网格列数：按逻辑宽度分级，1080p 盒子（约 1920 逻辑宽）取 5-6 列。
   static int gridColumns(double width) {
     if (width >= 1600) return 6;
     if (width >= 1200) return 5;
     return 4;
+  }
+
+  static SliverGridDelegate gridDelegate(
+    BuildContext context, {
+    required int columns,
+    required double mainAxisSpacing,
+    required double childAspectRatio,
+  }) {
+    if (AppLayoutSettings.tvMode.value) {
+      return TvGridDelegate(
+        crossAxisCount: columns,
+        minimumCardWidth:
+            140 *
+            (MediaQuery.textScalerOf(context).scale(15) / 15).clamp(1.0, 2.0),
+        crossAxisSpacing: 14,
+        mainAxisSpacing: mainAxisSpacing,
+        childAspectRatio: childAspectRatio,
+      );
+    }
+    return SliverGridDelegateWithFixedCrossAxisCount(
+      crossAxisCount: columns,
+      crossAxisSpacing: 14,
+      mainAxisSpacing: mainAxisSpacing,
+      childAspectRatio: childAspectRatio,
+    );
   }
 
   /// TV 卡片宽高比（宽/高）。
@@ -51,4 +86,23 @@ class TvLayout {
   /// 侧栏宽度（TabletLayoutHost 使用），比手机端抽屉更宽。
   static const double railWidthMin = 320;
   static const double railWidthMax = 360;
+}
+
+class TvUiScaleScope extends InheritedWidget {
+  final Size unscaledSize;
+  final double scale;
+
+  const TvUiScaleScope({
+    super.key,
+    required this.unscaledSize,
+    required this.scale,
+    required super.child,
+  });
+
+  static TvUiScaleScope? maybeOf(BuildContext context) =>
+      context.dependOnInheritedWidgetOfExactType<TvUiScaleScope>();
+
+  @override
+  bool updateShouldNotify(TvUiScaleScope oldWidget) =>
+      unscaledSize != oldWidget.unscaledSize || scale != oldWidget.scale;
 }

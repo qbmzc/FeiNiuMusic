@@ -11,7 +11,6 @@ import '../../../app/services/player_service.dart';
 import '../../../app/state/settings_state.dart';
 import '../../../app/tv/tv_layout.dart';
 import '../../../components/index.dart';
-import '../tv_player_scale.dart';
 import '../widgets/player_bottom_panel.dart';
 import 'widgets/lyrics_actions_bar.dart';
 import 'widgets/lyrics_drag_to_seek.dart';
@@ -547,8 +546,7 @@ class _PlayerLyricsViewState extends State<PlayerLyricsView> with SignalsMixin {
         final dragSeek = _dragSeek.value;
         final showTranslation = _showTranslation.value;
         final forceKaraoke = _forceKaraoke.value;
-        final fontSizeScale =
-            AppLayoutSettings.tvMode.value && !TvPlayerScale.contains(context)
+        final fontSizeScale = AppLayoutSettings.tvMode.value
             ? TvLayout.uiScale(context)
             : 1.0;
         final rawFontSize = _fontSize.value;

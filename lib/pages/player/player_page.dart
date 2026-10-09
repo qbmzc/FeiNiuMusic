@@ -13,6 +13,7 @@ import '../../app/services/lyrics/lyrics_service.dart';
 import '../../app/services/player_service.dart';
 import '../../app/state/settings_state.dart';
 import '../../app/state/song_state.dart';
+import '../../app/tv/tv_ui_scale.dart';
 import '../../app/utils/route_visibility.dart';
 import '../../components/common/artwork_widget.dart';
 import '../../components/player/lyric_preview.dart';
@@ -24,7 +25,6 @@ import 'widgets/player_bottom_panel.dart';
 import 'widgets/player_header.dart';
 import 'widgets/player_favorite_button.dart';
 import 'tv_player_focus_scope.dart';
-import 'tv_player_scale.dart';
 
 class PlayerPage extends StatefulWidget {
   const PlayerPage({super.key});
@@ -335,8 +335,9 @@ class _PlayerPageState extends State<PlayerPage>
                         icon: Icon(
                           Icons.arrow_back_rounded,
                           size: 24,
-                          color: Theme.of(context).colorScheme.onSurface
-                              .withValues(alpha: 0.72),
+                          color: Theme.of(
+                            context,
+                          ).colorScheme.onSurface.withValues(alpha: 0.72),
                         ),
                         onPressed: _closePlayer,
                       ),
@@ -356,7 +357,7 @@ class _PlayerPageState extends State<PlayerPage>
       onTogglePlayPause: () => _player.togglePlayPause(),
       onPrevious: _player.previous,
       onNext: _player.next,
-      child: TvPlayerScale(child: page),
+      child: TvUiScale(child: page),
     );
   }
 }
@@ -520,8 +521,9 @@ class _LandscapePlayerLayoutState extends State<_LandscapePlayerLayout> {
             child: ClipRRect(
               borderRadius: BorderRadius.circular(lyricRadius),
               child: Container(
-                color: Theme.of(context).colorScheme.surface
-                    .withValues(alpha: 0.16),
+                color: Theme.of(
+                  context,
+                ).colorScheme.surface.withValues(alpha: 0.16),
                 child: const PlayerLyricsView(fadeEdges: true),
               ),
             ),

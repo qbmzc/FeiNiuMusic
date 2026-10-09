@@ -846,11 +846,11 @@ class _PlaylistsPageState extends State<PlaylistsPage>
                                       (_loadingMore.value ? 1 : 0),
                                 ),
                                 gridDelegate:
-                                    SliverGridDelegateWithFixedCrossAxisCount(
-                                      crossAxisCount: _adaptiveGridColumns(
+                                    TvLayout.gridDelegate(
+                                      context,
+                                      columns: _adaptiveGridColumns(
                                         context,
                                       ),
-                                      crossAxisSpacing: 14,
                                       mainAxisSpacing:
                                           _gridMainAxisSpacingForColumns(
                                             _adaptiveGridColumns(context),

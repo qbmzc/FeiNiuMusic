@@ -3,6 +3,7 @@ import 'dart:convert';
 
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:signals_flutter/signals_flutter.dart';
 
@@ -78,6 +79,7 @@ class _AlbumsPageState extends State<AlbumsPage>
   late final _sortMode = createSignal(albumsDefaultSortMode);
   late final _ascending = createSignal(albumsDefaultAscending);
   late final _gridColumns = createSignal(2);
+  final _gridKey = GlobalKey();
 
   int _currentPage = 1;
   bool _hasMore = true;
@@ -492,6 +494,22 @@ class _AlbumsPageState extends State<AlbumsPage>
   void _scrollToIndex(int index, BuildContext context) {
     if (!_gridController.hasClients) return;
     const headerHeight = 8.0;
+    final grid =
+        _gridKey.currentContext?.findRenderObject() as RenderSliverGrid?;
+    if (grid != null) {
+      final layout = grid.gridDelegate.getLayout(grid.constraints);
+      final topPadding = AppLayoutSettings.tvMode.value
+          ? TvLayout.pagePadding().top
+          : 0.0;
+      final offset =
+          layout.getGeometryForChildIndex(index).scrollOffset +
+          headerHeight +
+          topPadding;
+      _gridController.jumpTo(
+        offset.clamp(0.0, _gridController.position.maxScrollExtent),
+      );
+      return;
+    }
     final screenWidth = MediaQuery.of(context).size.width;
     final cols = _adaptiveGridColumns(context);
     final totalSpacing = 14.0 * (cols - 1);
@@ -520,6 +538,7 @@ class _AlbumsPageState extends State<AlbumsPage>
                   ? TvLayout.pagePadding()
                   : const EdgeInsets.fromLTRB(12, 0, 12, 160),
               sliver: SliverGrid(
+                key: _gridKey,
                 delegate: SliverChildBuilderDelegate((context, index) {
                   if (index >= _groups.value.length) {
                     return const Center(
@@ -618,9 +637,9 @@ class _AlbumsPageState extends State<AlbumsPage>
                     ),
                   );
                 }, childCount: _groups.value.length + (_loadingMore.value ? 1 : 0)),
-                gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                  crossAxisCount: _adaptiveGridColumns(context),
-                  crossAxisSpacing: 14,
+                gridDelegate: TvLayout.gridDelegate(
+                  context,
+                  columns: _adaptiveGridColumns(context),
                   mainAxisSpacing: _gridMainAxisSpacingForColumns(
                     _adaptiveGridColumns(context),
                   ),

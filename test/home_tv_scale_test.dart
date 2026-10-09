@@ -5,6 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:feiniu_music/app/services/feiniu/api_models.dart';
 import 'package:feiniu_music/app/state/settings_layout_state.dart';
 import 'package:feiniu_music/app/state/song_state.dart';
+import 'package:feiniu_music/app/tv/tv_ui_scale.dart';
 import 'package:feiniu_music/components/layout/side_menu.dart';
 import 'package:feiniu_music/pages/home/widgets/home_large_layout.dart';
 import 'package:feiniu_music/pages/home/widgets/home_hero_banner.dart';
@@ -76,24 +77,27 @@ void main() {
         tester.view.physicalSize = size;
         tester.view.devicePixelRatio = 1;
         addTearDown(tester.view.reset);
-        // 侧栏占用的真实宽度与 TabletLayoutHost 一致。
-        final railWidth = (size.width * .28)
-            .clamp(640.0, 720.0)
-            .clamp(0.0, size.width * .45);
         await tester.pumpWidget(
           MaterialApp(
             builder: (context, child) => MediaQuery(
-              data: MediaQuery.of(
-                context,
-              ).copyWith(textScaler: TextScaler.linear(textScale)),
-              child: child!,
+              data: MediaQuery.of(context)
+                  .copyWith(textScaler: TextScaler.linear(textScale)),
+              child: TvUiScale(child: child!),
             ),
             home: Scaffold(
-              body: Row(
-                children: [
-                  SizedBox(width: railWidth, child: const SideMenu()),
-                  Expanded(child: _home()),
-                ],
+              body: LayoutBuilder(
+                builder: (context, constraints) {
+                  final width = constraints.maxWidth;
+                  final railWidth = (width * .28)
+                      .clamp(320.0, 360.0)
+                      .clamp(0.0, width * .45);
+                  return Row(
+                    children: [
+                      SizedBox(width: railWidth, child: const SideMenu()),
+                      Expanded(child: _home()),
+                    ],
+                  );
+                },
               ),
             ),
           ),
@@ -147,9 +151,8 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         builder: (context, child) => MediaQuery(
-          data: MediaQuery.of(
-            context,
-          ).copyWith(textScaler: TextScaler.linear(1.5)),
+          data: MediaQuery.of(context)
+              .copyWith(textScaler: TextScaler.linear(1.5)),
           child: child!,
         ),
         home: Scaffold(
@@ -181,9 +184,8 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         builder: (context, child) => MediaQuery(
-          data: MediaQuery.of(
-            context,
-          ).copyWith(textScaler: TextScaler.linear(1.5)),
+          data: MediaQuery.of(context)
+              .copyWith(textScaler: TextScaler.linear(1.5)),
           child: child!,
         ),
         home: Scaffold(

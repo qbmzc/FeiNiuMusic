@@ -18,6 +18,7 @@ import 'services/app_update_service.dart';
 import 'services/feiniu/account_store.dart';
 import 'services/feiniu/auth_service.dart';
 import 'state/settings_state.dart';
+import 'tv/tv_ui_scale.dart';
 import 'theme/app_styles.dart';
 import 'theme/app_visual_theme.dart';
 import 'utils/app_navigator.dart';
@@ -254,7 +255,7 @@ class FeiNiuMusicApp extends StatelessWidget {
                                 child: content,
                               );
                             }
-                            return content;
+                            return TvUiScale(child: content);
                           },
                           ),
                         );
