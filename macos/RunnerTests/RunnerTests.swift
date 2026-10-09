@@ -68,12 +68,19 @@ class RunnerTests: XCTestCase {
   func testDockReopenRestoresMiniaturizedMainWindow() throws {
     let mainWindow = makeWindow()
     mainWindow.makeKeyAndOrderFront(nil)
+    let miniaturized = XCTNSPredicateExpectation(
+      predicate: NSPredicate { _, _ in mainWindow.isMiniaturized },
+      object: mainWindow)
     mainWindow.miniaturize(nil)
-    XCTAssertTrue(mainWindow.isMiniaturized)
+    wait(for: [miniaturized], timeout: 5)
 
+    let restored = XCTNSPredicateExpectation(
+      predicate: NSPredicate { _, _ in
+        !mainWindow.isMiniaturized && mainWindow.isVisible
+      },
+      object: mainWindow)
     XCTAssertFalse(try reopenMainWindow(mainWindow, hasVisibleWindows: true))
 
-    XCTAssertFalse(mainWindow.isMiniaturized)
-    XCTAssertTrue(mainWindow.isVisible)
+    wait(for: [restored], timeout: 5)
   }
 }
