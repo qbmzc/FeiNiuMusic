@@ -9,7 +9,6 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
 import 'package:just_audio/just_audio.dart';
 import 'package:media_kit/media_kit.dart' as mk;
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:signals/signals.dart';
 
 import 'db/dao/song_dao.dart';
@@ -26,6 +25,7 @@ import 'player/just_audio_engine.dart';
 import 'player/media_kit_engine.dart';
 import 'player/playback_router.dart';
 import 'player/player_engine.dart';
+import 'player/playback_session_store.dart';
 import 'stats_service.dart';
 import 'listening_recorder_service.dart';
 import 'volume_schedule_service.dart';
@@ -276,13 +276,7 @@ class PlayerService with WidgetsBindingObserver {
   /// 手动增删会破坏链的连续性，因此漫游队列不允许删除歌曲。
   bool get roamActive => roamId != null && roamId!.isNotEmpty;
 
-  static const String _prefsQueueKey = 'playback_queue_v1';
-  static const String _prefsIndexKey = 'playback_index_v1';
-  static const String _prefsPositionKey = 'playback_position_v1';
-  static const String _prefsModeKey = 'playback_mode_v1';
-  static const String _prefsWasPlayingKey = 'playback_was_playing_v1';
-  static const String _prefsSongIdKey = 'playback_song_id_v1';
-  static const String _prefsRoamIdKey = 'playback_roam_id_v1';
+  final _sessionStore = PlaybackSessionStore();
 
   bool get hasLoadedAudioSource => _activeEngine.hasLoadedSource;
 
@@ -290,12 +284,54 @@ class PlayerService with WidgetsBindingObserver {
   /// 即过滤掉——从源头避免把 .txt 等不可播文件带进播放器（否则启动恢复队列
   /// 时 mpv 无法解码 → 误报 completed → 无限循环切歌）。
   static const Set<String> _nonAudioExtensions = {
-    'txt', 'log', 'md', 'pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx',
-    'jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'svg', 'ico',
-    'zip', 'rar', '7z', 'tar', 'gz', 'bz2', 'xz',
-    'exe', 'dll', 'bat', 'cmd', 'sh', 'msi',
-    'json', 'html', 'htm', 'css', 'js', 'ts', 'py', 'java', 'c', 'cpp', 'h',
-    'ini', 'cfg', 'yaml', 'yml', 'csv', 'xml',
+    'txt',
+    'log',
+    'md',
+    'pdf',
+    'doc',
+    'docx',
+    'xls',
+    'xlsx',
+    'ppt',
+    'pptx',
+    'jpg',
+    'jpeg',
+    'png',
+    'gif',
+    'bmp',
+    'webp',
+    'svg',
+    'ico',
+    'zip',
+    'rar',
+    '7z',
+    'tar',
+    'gz',
+    'bz2',
+    'xz',
+    'exe',
+    'dll',
+    'bat',
+    'cmd',
+    'sh',
+    'msi',
+    'json',
+    'html',
+    'htm',
+    'css',
+    'js',
+    'ts',
+    'py',
+    'java',
+    'c',
+    'cpp',
+    'h',
+    'ini',
+    'cfg',
+    'yaml',
+    'yml',
+    'csv',
+    'xml',
   };
 
   /// 该歌曲是否确定不可播（非音频文件）：按 format / uri 扩展名判断。
@@ -324,23 +360,25 @@ class PlayerService with WidgetsBindingObserver {
 
   PlayerService._internal() {
     WidgetsBinding.instance.addObserver(this);
-    _wifiDirectPolicyActive = AppTranscodeSettings.directOnWifi.value &&
+    _wifiDirectPolicyActive =
+        AppTranscodeSettings.directOnWifi.value &&
         NetworkConnectionService.instance.isWifiConnected;
     NetworkConnectionService.instance.wifiConnected.addListener(
       _scheduleNetworkRouteRefresh,
     );
-    AppTranscodeSettings.directOnWifi.addListener(
-      _scheduleNetworkRouteRefresh,
-    );
+    AppTranscodeSettings.directOnWifi.addListener(_scheduleNetworkRouteRefresh);
     _initFuture = _init();
   }
 
   void _scheduleNetworkRouteRefresh() {
-    final active = AppTranscodeSettings.directOnWifi.value &&
+    final active =
+        AppTranscodeSettings.directOnWifi.value &&
         NetworkConnectionService.instance.isWifiConnected;
     if (active == _wifiDirectPolicyActive) return;
     _wifiDirectPolicyActive = active;
-    if (queue.value.isEmpty || currentIndex.value < 0 || isCasting.value) return;
+    if (queue.value.isEmpty || currentIndex.value < 0 || isCasting.value) {
+      return;
+    }
     _networkRouteRefreshTimer?.cancel();
     _networkRouteRefreshTimer = Timer(const Duration(milliseconds: 500), () {
       unawaited(_refreshNetworkTranscodeRoute());
@@ -402,7 +440,9 @@ class PlayerService with WidgetsBindingObserver {
     }
     if (state == AppLifecycleState.paused ||
         state == AppLifecycleState.hidden) {
-      _syncPositionFromPlayer();
+      _syncPositionFromPlayer(
+        allowZeroOverride: !(_restoreSession?.protectPosition ?? false),
+      );
       _persistPlaybackStateNow();
       _statsService.flush();
       _recorder.onLifecyclePause();
@@ -413,7 +453,9 @@ class PlayerService with WidgetsBindingObserver {
     }
     if (state == AppLifecycleState.inactive ||
         state == AppLifecycleState.detached) {
-      _syncPositionFromPlayer();
+      _syncPositionFromPlayer(
+        allowZeroOverride: !(_restoreSession?.protectPosition ?? false),
+      );
       _persistPlaybackStateNow();
       _statsService.flush();
       _recorder.onLifecyclePause();
@@ -576,10 +618,9 @@ class PlayerService with WidgetsBindingObserver {
       //（normalizeCroppedPosition），这里按曲目自身 duration 覆盖时长，与
       // just_audio 的 ClippingAudioSource（上报裁剪后时长）行为一致；也避免
       // 把整轨时长误持久化进曲目。
-      final effective =
-          song != null && song.isCue && (song.durationMs ?? 0) > 0
-              ? Duration(milliseconds: song.durationMs!)
-              : value;
+      final effective = song != null && song.isCue && (song.durationMs ?? 0) > 0
+          ? Duration(milliseconds: song.durationMs!)
+          : value;
       duration.value = effective;
       final ms = effective?.inMilliseconds ?? 0;
       if (song != null && ms > 0) {
@@ -1213,12 +1254,7 @@ class PlayerService with WidgetsBindingObserver {
     if (isCue && cueOffset != null) {
       final offset = Duration(milliseconds: cueOffset);
       final end = Duration(milliseconds: cueOffset + (song.durationMs ?? 0));
-      return mk.Media(
-        uri,
-        start: offset,
-        end: end,
-        httpHeaders: headers,
-      );
+      return mk.Media(uri, start: offset, end: end, httpHeaders: headers);
     }
     return mk.Media(uri, httpHeaders: headers);
   }
@@ -2869,7 +2905,9 @@ class PlayerService with WidgetsBindingObserver {
     final idx = currentIndex.value;
     if (song == null || idx < 0) return;
     final svc = FeiNiuTranscodeService.instance;
-    _debugLog('setTranscodeOverride ${song.title} -> ${format?.name ?? 'global'}');
+    _debugLog(
+      'setTranscodeOverride ${song.title} -> ${format?.name ?? 'global'}',
+    );
     svc.setForcedTranscodeCodec(song.id, format?.name);
     // 强制转码与强制直连互斥：选了转码格式就取消该歌的直连覆盖。
     _forceDirectSongIds.remove(song.id);
@@ -3170,55 +3208,18 @@ class PlayerService with WidgetsBindingObserver {
   }
 
   Future<_PlaybackRestoreState?> _readPersistedPlaybackState() async {
-    final prefs = await SharedPreferences.getInstance();
-    final raw = prefs.getString(_prefsQueueKey);
-    if (raw == null || raw.trim().isEmpty) return null;
-
-    List<SongEntity> restoredQueue = [];
-    try {
-      final decoded = jsonDecode(raw);
-      if (decoded is List) {
-        restoredQueue = decoded
-            .whereType<Map>()
-            .map((e) => SongEntity.fromMap(e.cast<String, dynamic>()))
-            .where((s) => (s.uri ?? '').trim().isNotEmpty)
-            // 启动恢复队列前过滤确定非音频的文件（.txt 等）：让不可播文件
-            // 根本进不了恢复队列，从源头避免「启动自动播放 → mpv 无法解码 →
-            // 无限循环切歌」。
-            .where((s) => !_isDefinitelyNonAudio(s))
-            .toList();
-      }
-    } catch (_) {
-      return null;
-    }
-    if (restoredQueue.isEmpty) return null;
-
-    final savedIndex = prefs.getInt(_prefsIndexKey) ?? 0;
-    final savedPositionMs = prefs.getInt(_prefsPositionKey) ?? 0;
-    final savedMode = prefs.getString(_prefsModeKey);
-    final savedSongId = prefs.getString(_prefsSongIdKey);
-    final savedRoamId = prefs.getString(_prefsRoamIdKey);
-    final mode = _playbackModeFromString(savedMode) ?? PlaybackMode.loop;
-    var actualIndex = savedIndex;
-    if (savedSongId != null && savedSongId.isNotEmpty) {
-      final idx = restoredQueue.indexWhere((s) => s.id == savedSongId);
-      if (idx >= 0) actualIndex = idx;
-    }
-    if (actualIndex < 0) actualIndex = 0;
-    if (actualIndex >= restoredQueue.length) {
-      actualIndex = restoredQueue.length - 1;
-    }
-    final songId = restoredQueue[actualIndex].id;
+    final saved = await _sessionStore.read(
+      canRestoreSong: (song) => !_isDefinitelyNonAudio(song),
+    );
+    if (saved == null) return null;
     return _PlaybackRestoreState(
-      queue: restoredQueue,
-      index: actualIndex,
-      songId: songId,
-      position: Duration(
-        milliseconds: savedPositionMs < 0 ? 0 : savedPositionMs,
-      ),
-      mode: mode,
-      wasPlaying: prefs.getBool(_prefsWasPlayingKey) ?? false,
-      roamId: savedRoamId,
+      queue: saved.queue,
+      index: saved.index,
+      songId: saved.queue[saved.index].id,
+      position: saved.position,
+      mode: saved.mode,
+      wasPlaying: saved.wasPlaying,
+      roamId: saved.roamId,
     );
   }
 
@@ -3547,19 +3548,6 @@ class PlayerService with WidgetsBindingObserver {
     unawaited(_applyAudioSessionConfiguration());
   }
 
-  PlaybackMode? _playbackModeFromString(String? value) {
-    switch (value) {
-      case 'shuffle':
-        return PlaybackMode.shuffle;
-      case 'loop':
-        return PlaybackMode.loop;
-      case 'single':
-        return PlaybackMode.single;
-      default:
-        return null;
-    }
-  }
-
   Future<void> _applyPlaybackMode(PlaybackMode mode) async {
     // 双引擎架构下 run 不自动回卷：loop 用 none（逻辑层驱动回卷），
     // single 用 single（引擎重复当前曲）。shuffle 也用 none（播完逻辑层补链）。
@@ -3640,34 +3628,21 @@ class PlayerService with WidgetsBindingObserver {
   Future<void> _persistPlaybackState() async {
     _lastPersistTime = DateTime.now();
     final list = queue.value;
-    if (list.isEmpty || currentIndex.value < 0) {
-      await _clearPersistedPlaybackState();
-      return;
-    }
-    final prefs = await SharedPreferences.getInstance();
-    final serialized = jsonEncode(list.map((e) => e.toMap()).toList());
-    await prefs.setString(_prefsQueueKey, serialized);
-    await prefs.setInt(_prefsIndexKey, currentIndex.value);
-    await prefs.setInt(
-      _prefsPositionKey,
-      _positionForPersistence().inMilliseconds,
-    );
-    await prefs.setString(_prefsModeKey, playbackMode.value.name);
-    await prefs.setBool(_prefsWasPlayingKey, isPlaying.value);
-    // 持久化漫游链 ID：随机模式重启后 next/播完沿用同一个随机队列
-    final roam = roamId;
-    if (roam == null || roam.isEmpty) {
-      await prefs.remove(_prefsRoamIdKey);
-    } else {
-      await prefs.setString(_prefsRoamIdKey, roam);
-    }
-    final songId = currentSong.value?.id;
-    if (songId == null || songId.isEmpty) {
-      await prefs.remove(_prefsSongIdKey);
-    } else {
-      await prefs.setString(_prefsSongIdKey, songId);
-    }
+    final index = currentIndex.value;
+    final session = list.isEmpty || index < 0 || index >= list.length
+        ? null
+        : PlaybackSession(
+            queue: list,
+            index: index,
+            position: _positionForPersistence(),
+            mode: playbackMode.value,
+            wasPlaying: isPlaying.value,
+            roamId: roamId,
+          );
+    await _sessionStore.save(session);
   }
+
+  Future<void> _clearPersistedPlaybackState() => _sessionStore.save(null);
 
   Duration _positionForPersistence() {
     final session = _restoreSession;
@@ -3676,17 +3651,6 @@ class PlayerService with WidgetsBindingObserver {
       return session.position;
     }
     return position.value;
-  }
-
-  Future<void> _clearPersistedPlaybackState() async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.remove(_prefsQueueKey);
-    await prefs.remove(_prefsIndexKey);
-    await prefs.remove(_prefsPositionKey);
-    await prefs.remove(_prefsModeKey);
-    await prefs.remove(_prefsWasPlayingKey);
-    await prefs.remove(_prefsSongIdKey);
-    await prefs.remove(_prefsRoamIdKey);
   }
 
   Map<String, String>? _headersFromSong(SongEntity song) {
