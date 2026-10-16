@@ -41,6 +41,8 @@ class AppUpdateService {
   /// maintenance counter and shouldn't appear in the displayed version or
   /// affect update comparison.
   Future<String> currentVersion() async {
+    const previewVersion = String.fromEnvironment('APP_PREVIEW_VERSION');
+    if (previewVersion.isNotEmpty) return previewVersion;
     final cached = _cachedVersion;
     if (cached != null) return cached;
     try {
