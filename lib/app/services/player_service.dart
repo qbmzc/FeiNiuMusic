@@ -423,9 +423,23 @@ class PlayerService with WidgetsBindingObserver {
   /// 避免在初始化完成前被调用导致与恢复流程的 setAudioSources 并发交错、
   /// 播放器物理 loop/shuffle 状态被覆盖。
   late final Future<void> _initFuture;
+  bool _shuttingDown = false;
+  Future<void>? _exitFuture;
+
+  Future<void> prepareForExit() => _exitFuture ??= _prepareForExit();
+
+  Future<void> _prepareForExit() async {
+    await _initFuture;
+    _syncPositionFromPlayer(allowZeroOverride: false);
+    await _persistPlaybackStateNow();
+    _shuttingDown = true;
+    _queueGeneration++;
+    await dispose();
+  }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (_shuttingDown) return;
     if (state == AppLifecycleState.resumed) {
       _stopBackgroundAudioKeepAlive();
       // 后台期间 Timer 挂起，resume 立即重检定时音量（时间窗可能已跨越）。
@@ -446,7 +460,9 @@ class PlayerService with WidgetsBindingObserver {
       _persistPlaybackStateNow();
       _statsService.flush();
       _recorder.onLifecyclePause();
-      if (isPlaying.value) {
+      // 投屏时 isPlaying 代表渲染器状态；本机引擎已暂停，不需要用音频会话
+      // 保活，否则 Android 会反复 setActive(true)，可能触发音频焦点中断。
+      if (isPlaying.value && !isCasting.value) {
         _startBackgroundAudioKeepAlive();
       }
       return;
@@ -578,7 +594,7 @@ class PlayerService with WidgetsBindingObserver {
   void _wireEngine(PlayerEngine engine) {
     if (!_wiredEngines.add(engine)) return;
     engine.positionStream.listen((value) {
-      if (!identical(engine, _activeEngine)) return;
+      if (_shuttingDown || !identical(engine, _activeEngine)) return;
       // 投屏遥控模式：位置由投屏设备轮询驱动，忽略本机引擎的位置事件
       // （投屏续播/预填会重载引擎队列，可能广播 position=0 把进度条打回起点）。
       if (isCasting.value) return;
@@ -608,7 +624,7 @@ class PlayerService with WidgetsBindingObserver {
       _emitSnapshot();
     });
     engine.durationStream.listen((value) {
-      if (!identical(engine, _activeEngine)) return;
+      if (_shuttingDown || !identical(engine, _activeEngine)) return;
       // 投屏遥控模式：时长沿用投屏起始歌曲，忽略引擎的时长事件。
       if (isCasting.value) return;
       final song = currentSong.value;
@@ -629,14 +645,14 @@ class PlayerService with WidgetsBindingObserver {
       _emitSnapshot(force: true);
     });
     engine.bufferedPositionStream.listen((value) {
-      if (!identical(engine, _activeEngine)) return;
+      if (_shuttingDown || !identical(engine, _activeEngine)) return;
       // 投屏遥控模式：忽略本机引擎的缓冲进度。
       if (isCasting.value) return;
       bufferedPosition.value = value;
       _emitSnapshot(force: true);
     });
     engine.playbackStateStream.listen((state) {
-      if (!identical(engine, _activeEngine)) return;
+      if (_shuttingDown || !identical(engine, _activeEngine)) return;
       // 投屏遥控模式：播放/暂停状态由投屏设备轮询驱动，忽略本机引擎事件
       // （引擎暂停/重载会广播 playing=false 覆盖投屏设备的播放状态）。
       if (isCasting.value) return;
@@ -668,11 +684,11 @@ class PlayerService with WidgetsBindingObserver {
       }
     });
     engine.errorStream.listen((error) {
-      if (!identical(engine, _activeEngine)) return;
+      if (_shuttingDown || !identical(engine, _activeEngine)) return;
       unawaited(_handlePlayerError(error));
     });
     engine.currentIndexStream.listen((idx) {
-      if (!identical(engine, _activeEngine)) return;
+      if (_shuttingDown || !identical(engine, _activeEngine)) return;
       if (idx == null) return;
       // 投屏遥控模式：本机引擎暂停，其索引全是旧队列的噪音（投屏续播/预填
       // 会 insertItem/重载引擎队列，触发 currentIndex=0 广播把 UI 打回第一首）。
@@ -735,7 +751,7 @@ class PlayerService with WidgetsBindingObserver {
   /// 引擎 `completed` 统一处理：驱动跨引擎前进 / 队尾回卷 / 漫游补链。
   /// 这是双引擎架构下循环语义的核心——run 不自动回卷，逻辑层驱动一切。
   Future<void> _handleEngineCompleted(PlayerEngine engine) async {
-    if (!identical(engine, _activeEngine)) return;
+    if (_shuttingDown || !identical(engine, _activeEngine)) return;
     if (playbackMode.value == PlaybackMode.single) return; // 引擎自行重复
     _recorder.markCompleted(); // 完整播完：报告埋点标记 completed=1
     // 当前歌播完：若它是转码 HLS，后台把全部分片拼接下载成完整文件，
@@ -3409,6 +3425,7 @@ class PlayerService with WidgetsBindingObserver {
   }
 
   void _startBackgroundAudioKeepAliveIfNeeded() {
+    if (isCasting.value) return;
     final lifecycle = WidgetsBinding.instance.lifecycleState;
     if (lifecycle == AppLifecycleState.paused ||
         lifecycle == AppLifecycleState.hidden) {
@@ -3421,7 +3438,9 @@ class PlayerService with WidgetsBindingObserver {
     _backgroundAudioKeepAliveTimer = Timer.periodic(
       const Duration(seconds: 25),
       (_) {
-        if (!isPlaying.value) {
+        // 生命周期切换后可能已经开始投屏；停止本机音频会话保活，避免
+        // 将渲染器的播放状态误认为本机仍在播放。
+        if (!isPlaying.value || isCasting.value) {
           _stopBackgroundAudioKeepAlive();
           return;
         }
@@ -3559,7 +3578,7 @@ class PlayerService with WidgetsBindingObserver {
   }
 
   void _schedulePersistPlaybackState({bool immediate = false}) {
-    if (_restoringState) return;
+    if (_restoringState || _shuttingDown) return;
 
     if (immediate) {
       _persistTimer?.cancel();
@@ -3627,6 +3646,9 @@ class PlayerService with WidgetsBindingObserver {
   }
 
   Future<void> _persistPlaybackState() async {
+    // 窗口启动/失活事件也会直接保存，不能只在定时保存入口阻止写入。
+    // 恢复完成前的空队列、零进度不是用户清空，不能覆盖上次播放会话。
+    if (_restoringState || _shuttingDown) return;
     _lastPersistTime = DateTime.now();
     final list = queue.value;
     final index = currentIndex.value;
@@ -4179,6 +4201,10 @@ class PlayerService with WidgetsBindingObserver {
   }
 
   Future<void> dispose() async {
+    _shuttingDown = true;
+    _persistTimer?.cancel();
+    _snapshotTimer?.cancel();
+    _cancelSlowNetworkTimer();
     WidgetsBinding.instance.removeObserver(this);
     NetworkConnectionService.instance.wifiConnected.removeListener(
       _scheduleNetworkRouteRefresh,
@@ -4200,9 +4226,12 @@ class PlayerService with WidgetsBindingObserver {
     _silenceWatchTimer = null;
     _statsFlushTimer?.cancel();
     _statsService.flush();
+    _stopBackgroundAudioKeepAlive();
     await _interruptionSub?.cancel();
     await _becomingNoisySub?.cancel();
-    _stopBackgroundAudioKeepAlive();
+    // 在 Flutter 引擎仍存活时完成 mpv 的 stop 和回调注销。
+    await _mediaKitEngine?.dispose();
+    _mediaKitEngine = null;
     await _setAudioSessionActive(false);
     // 桌面端（Windows/macOS/Linux）just_audio 从未构造
     // （_defaultEngine 走 media_kit），访问 late final 会反构造一个
@@ -4210,8 +4239,6 @@ class PlayerService with WidgetsBindingObserver {
     if (!Platform.isWindows && !Platform.isMacOS && !Platform.isLinux) {
       await _justAudioEngine.dispose();
     }
-    await _mediaKitEngine?.dispose();
-    _mediaKitEngine = null;
   }
 }
 

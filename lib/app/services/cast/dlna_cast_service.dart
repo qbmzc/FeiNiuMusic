@@ -341,7 +341,7 @@ class DlnaCastService {
         _log('cast aborted: media proxy unavailable');
         return false;
       }
-      final proxyUrl = await _resolveCastUrl(song);
+      final proxyUrl = await _resolveCastUrl(song, device);
       if (proxyUrl == null) {
         _log('cast aborted: no castable URL');
         await MediaStreamProxy.instance.stop();
@@ -397,7 +397,32 @@ class DlnaCastService {
   }
 
   /// 解析可投屏的音频地址（转码 MP3 HLS 优先 / 直连兜底），经代理换签。
-  Future<String?> _resolveCastUrl(SongEntity song) async {
+  Future<String?> _resolveCastUrl(SongEntity song, DlnaDevice device) async {
+    final format = (song.format ?? song.codec ?? '').trim().toLowerCase();
+    final progressiveOnly = _isMiCastGo(device);
+    final canSendProgressive = const {
+      'mpeg',
+      'mp3',
+      'm4a',
+      'mp4a',
+      'aac',
+      'flac',
+      'wav',
+      'wave',
+    }.contains(format);
+
+    // MiCast Go treats an m3u8 URL as a complete audio file. Send supported
+    // source formats progressively so its downloader receives audio bytes.
+    if (progressiveOnly && canSendProgressive) {
+      final extension = _audioFileExtension(song);
+      _log('media route=direct renderer=MiCast Go extension=$extension');
+      return MediaStreamProxy.instance.registerMedia(
+        FeiNiuApiClient.instance.streamUrl(song.id),
+        headers: FeiNiuApiClient.imageAuthHeaders(),
+        fileExtension: extension,
+      );
+    }
+
     // 1) 需转码（DSF/APE/WMA… 或超过阈值的大文件）→ 转码 MP3 HLS
     //    （渲染器通用性最好）。失败则回退直连。
     final needsTranscode =
@@ -457,6 +482,16 @@ class DlnaCastService {
       'wma' || 'wmav1' || 'wmav2' => 'wma',
       _ => 'mp3',
     };
+  }
+
+  static bool _isMiCastGo(DlnaDevice device) {
+    final identity = [
+      device.friendlyName,
+      device.manufacturerDetails.manufacturer,
+      device.modelDetails.modelName,
+      device.modelDetails.modelDescription ?? '',
+    ].join(' ').toLowerCase();
+    return identity.contains('micast go');
   }
 
   /// 解析歌曲封面图经代理换签的匿名 URL（DLNA 渲染器直接拉取展示）。
@@ -537,7 +572,7 @@ class DlnaCastService {
     // 上一首的封面资源已不再需要，先清空避免泄漏（媒体流走 registerMedia，
     // 不受 _resources 影响）。
     MediaStreamProxy.instance.unregisterResources();
-    final proxyUrl = await _resolveCastUrl(song);
+    final proxyUrl = await _resolveCastUrl(song, device);
     if (proxyUrl == null) return;
     final coverProxyUrl = await _resolveCastCover(song);
     try {

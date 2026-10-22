@@ -102,6 +102,32 @@ void main() {
       },
     );
 
+    test(
+      'does not advertise the renderer address as the local address',
+      () async {
+        final renderer = await ServerSocket.bind(
+          InternetAddress('127.0.0.2'),
+          0,
+        );
+        final accepted = renderer.first;
+        try {
+          final local = await MediaStreamProxy.resolveLocalAddress(
+            '127.0.0.2',
+            renderer.port,
+          );
+          final peer = await accepted;
+          try {
+            expect(local, peer.remoteAddress.address);
+            expect(local, isNot('127.0.0.2'));
+          } finally {
+            peer.destroy();
+          }
+        } finally {
+          await renderer.close();
+        }
+      },
+    );
+
     test('fails when the renderer endpoint cannot be reached', () async {
       final renderer = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
       final port = renderer.port;

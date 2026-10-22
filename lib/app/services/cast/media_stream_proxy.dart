@@ -59,23 +59,39 @@ class MediaStreamProxy {
     if (host.isEmpty || port < 1 || port > 65535) {
       throw ArgumentError('Invalid renderer endpoint');
     }
-    final socket = await Socket.connect(
-      host,
-      port,
-      timeout: const Duration(seconds: 3),
+    final interfaces = await NetworkInterface.list(
+      type: InternetAddressType.IPv4,
+      includeLoopback: true,
     );
-    try {
-      final address = socket.address;
-      if (address.type != InternetAddressType.IPv4 ||
-          address.address == '0.0.0.0' ||
-          address.address.startsWith('169.254.')) {
-        throw StateError('No usable local IPv4 route to renderer');
+    final candidates = interfaces
+        .expand((interface) => interface.addresses)
+        .where(
+          (address) =>
+              address.address != '0.0.0.0' &&
+              !address.address.startsWith('169.254.'),
+        );
+    SocketException? lastError;
+    for (final address in candidates) {
+      try {
+        // Socket.address is the remote endpoint. Bind each candidate explicitly
+        // so the selected address is the phone's reachable LAN interface.
+        final socket = await Socket.connect(
+          host,
+          port,
+          sourceAddress: address,
+          timeout: const Duration(seconds: 3),
+        );
+        socket.destroy();
+        _log('route target=$host:$port local=${address.address}');
+        return address.address;
+      } on SocketException catch (error) {
+        lastError = error;
       }
-      _log('route target=$host:$port local=${address.address}');
-      return address.address;
-    } finally {
-      socket.destroy();
     }
+    if (lastError != null) throw lastError;
+    throw SocketException(
+      'No usable local IPv4 route to renderer: $host:$port',
+    );
   }
 
   /// 使用会话选定的本机地址启动代理；地址变化时释放旧会话。
