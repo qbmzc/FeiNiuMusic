@@ -19,6 +19,7 @@ class _Renderer extends MediaCastDlnaApi {
   Future<void> Function()? onPlay;
   Future<void> Function()? onInitialize;
   TransportState transport = TransportState.playing;
+  Object? pollError;
 
   @override
   Future<void> initializeUpnpService() async => await onInitialize?.call();
@@ -43,12 +44,14 @@ class _Renderer extends MediaCastDlnaApi {
   }
 
   @override
-  Future<PlaybackInfo> getPlaybackInfo(DeviceUdn deviceUdn) async =>
-      PlaybackInfo(
-        state: transport,
-        position: TimePosition(seconds: 0),
-        duration: TimeDuration(seconds: 200),
-      );
+  Future<PlaybackInfo> getPlaybackInfo(DeviceUdn deviceUdn) async {
+    if (pollError != null) throw pollError!;
+    return PlaybackInfo(
+      state: transport,
+      position: TimePosition(seconds: 0),
+      duration: TimeDuration(seconds: 200),
+    );
+  }
 }
 
 SongEntity _song(String id, {String format = 'flac'}) => SongEntity(
@@ -186,6 +189,68 @@ void main() {
     expect(requests, hasLength(1));
     expect(api.urls, hasLength(2));
   });
+
+  test('structured UPnP format fault triggers one fallback', () async {
+    api.onSetMedia = (url) async {
+      if (url.endsWith('.flac')) {
+        throw PlatformException(
+          code: 'dlna_action_failed',
+          details: {
+            'action': 'SetAVTransportURI',
+            'category': 'upnp_fault',
+            'upnpCode': 714,
+            'httpStatus': 500,
+            'elapsedMs': 50,
+          },
+        );
+      }
+    };
+    await service.loadSong(_song('structured-format'));
+    expect(api.urls, [endsWith('.flac'), endsWith('.m3u8')]);
+    expect(requests, hasLength(1));
+  });
+
+  for (final category in [
+    'invalid_response',
+    'timeout',
+    'network',
+    'http_error',
+  ]) {
+    test('structured $category is actionable and does not transcode', () async {
+      service.currentDevice.value = null;
+      api.onSetMedia = (_) async => throw PlatformException(
+        code: 'dlna_action_failed',
+        details: {
+          'action': 'SetAVTransportURI',
+          'category': category,
+          'httpStatus': 503,
+        },
+      );
+      expect(await service.castTo(device, _song(category)), isFalse);
+      expect(requests, isEmpty);
+      expect(service.lastCastError, contains('SetAVTransportURI'));
+      expect(service.lastCastError, contains('HTTP 503'));
+    });
+  }
+
+  test(
+    'structured polling errors disconnect without startup fallback',
+    () async {
+      api.pollError = PlatformException(
+        code: 'dlna_action_failed',
+        details: {
+          'action': 'GetTransportInfo',
+          'category': 'invalid_response',
+          'causeTypes': ['SAXParseException'],
+        },
+      );
+      await service.loadSong(_song('poll-error'));
+      await fetch(api.urls.single);
+      await _until(() => !service.isCasting);
+      expect(requests, isEmpty);
+      expect(api.urls, hasLength(1));
+    },
+  );
 
   test('initial play format rejection uses the same fallback policy', () async {
     service.currentDevice.value = null;
@@ -357,6 +422,29 @@ void main() {
       expect(proxy.hasMediaFailure, isFalse);
     },
   );
+
+  test('HLS upstream errors retain HTTP status and error body', () async {
+    serve = (request) async {
+      request.response.statusCode = 401;
+      request.response.headers.contentType = ContentType(
+        'application',
+        'vnd.apple.mpegurl',
+      );
+      request.response.write('authentication expired');
+      await request.response.close();
+    };
+    final url = (await MediaStreamProxy.instance.registerMedia(
+      'http://127.0.0.1:${upstream.port}/playlist.m3u8',
+      fileExtension: 'm3u8',
+    ))!;
+    final response = await (await client.getUrl(Uri.parse(url))).close();
+    expect(response.statusCode, 401);
+    expect(
+      await response.transform(const SystemEncoding().decoder).join(),
+      'authentication expired',
+    );
+    expect(MediaStreamProxy.instance.hasMediaFailure, isTrue);
+  });
 
   test(
     'late body or error from old resource cannot affect new diagnostics',

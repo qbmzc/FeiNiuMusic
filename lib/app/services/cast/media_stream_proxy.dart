@@ -313,7 +313,10 @@ class MediaStreamProxy {
             'hls=$isM3u8',
           );
         }
-        if (isM3u8 && request.method != 'HEAD') {
+        if (isM3u8 &&
+            upResp.statusCode >= 200 &&
+            upResp.statusCode < 300 &&
+            request.method != 'HEAD') {
           // HLS：读取 m3u8 文本，改写分片地址后整体返回
           final text = await upResp.transform(utf8.decoder).join();
           final rewritten = _rewriteM3u8(text, uri, mediaProxyBase);

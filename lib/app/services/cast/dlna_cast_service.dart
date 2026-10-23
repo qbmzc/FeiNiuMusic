@@ -8,6 +8,7 @@ import '../../state/settings_cast_state.dart';
 import '../../state/song_state.dart';
 import '../feiniu/api_client.dart';
 import '../feiniu/transcode_service.dart';
+import 'dlna_action_failure.dart';
 import 'media_stream_proxy.dart';
 
 /// DLNA 投屏状态。
@@ -58,6 +59,7 @@ class DlnaCastService {
   }
 
   static String _safeError(Object error) =>
+      DlnaActionFailure.from(error)?.diagnostic ??
       error.toString().replaceAll(RegExp(r'https?://[^\s]+'), '<url>');
 
   final MediaCastDlnaApi _api;
@@ -404,7 +406,8 @@ class DlnaCastService {
       return true;
     } catch (e) {
       if (!isCurrent()) return false;
-      lastCastError = '投屏加载失败，请检查设备和网络后重试';
+      lastCastError =
+          DlnaActionFailure.from(e)?.userMessage ?? '投屏加载失败，请检查设备和网络后重试';
       _log('cast failed: ${_safeError(e)}');
       await MediaStreamProxy.instance.stop();
       return false;
@@ -496,6 +499,11 @@ class DlnaCastService {
       _log('play accepted route=${transcode ? 'transcoded-hls' : 'direct'}');
       return true;
     } catch (error) {
+      if (isCurrent()) {
+        _log(
+          'media command failed route=${transcode ? 'transcoded-hls' : 'direct'} ${_safeError(error)}',
+        );
+      }
       if (isCurrent() &&
           !transcode &&
           !_transcodeAttempted &&
@@ -511,6 +519,8 @@ class DlnaCastService {
   }
 
   static bool _isFormatError(Object error) {
+    final failure = DlnaActionFailure.from(error);
+    if (failure != null) return failure.isFormatError;
     if (error is! PlatformException) return false;
     if (const {'704', '714'}.contains(error.code)) return true;
     final message = '${error.message ?? ''} ${error.details ?? ''}'
@@ -682,7 +692,8 @@ class DlnaCastService {
       castPlaying.value = true;
     } catch (e) {
       if (isCurrent()) {
-        lastCastError = '投屏加载失败，请检查设备和网络后重试';
+        lastCastError =
+            DlnaActionFailure.from(e)?.userMessage ?? '投屏加载失败，请检查设备和网络后重试';
         _log('loadSong failed: ${_safeError(e)}; no further retry');
         unawaited(disconnect(reason: lastCastError));
       }
@@ -754,7 +765,7 @@ class DlnaCastService {
       try {
         final info = await _api
             .getPlaybackInfo(device.udn)
-            .timeout(const Duration(seconds: 5));
+            .timeout(const Duration(seconds: 6));
         if (!isCurrent()) return;
         _castPollFailures = 0;
         final posSec = info.position.seconds;
