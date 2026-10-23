@@ -9,6 +9,7 @@ import '../../state/song_state.dart';
 import '../feiniu/api_client.dart';
 import '../feiniu/transcode_service.dart';
 import 'dlna_action_failure.dart';
+import 'dlna_capabilities.dart';
 import 'media_stream_proxy.dart';
 
 /// DLNA 投屏状态。
@@ -61,6 +62,26 @@ class DlnaCastService {
   static String _safeError(Object error) =>
       DlnaActionFailure.from(error)?.diagnostic ??
       error.toString().replaceAll(RegExp(r'https?://[^\s]+'), '<url>');
+
+  static const _capabilitiesChannel = MethodChannel('com.feiniu.music/dlna_capabilities');
+  DlnaCapabilities _capabilities = DlnaCapabilities(null);
+  String? _capabilityDeviceUdn;
+
+  Future<void> _ensureCapabilities(DlnaDevice device, bool Function() isCurrent) async {
+    if (_capabilityDeviceUdn == device.udn.value) return;
+    String? sink;
+    try {
+      sink = await _capabilitiesChannel.invokeMethod<String>(
+        'getSinkProtocolInfo', {'udn': device.udn.value},
+      ).timeout(const Duration(seconds: 6));
+    } catch (error) {
+      _log('capability query unavailable: ${_safeError(error)}');
+    }
+    if (!isCurrent()) return;
+    _capabilities = DlnaCapabilities(sink);
+    _capabilityDeviceUdn = device.udn.value;
+    _log('capability query result=${sink == null ? 'unknown' : 'received'}');
+  }
 
   final MediaCastDlnaApi _api;
   final Duration _positionPollInterval;
@@ -200,7 +221,7 @@ class DlnaCastService {
   }
 
   /// 通知原生层「投屏中，物理音量键应拦截并回调」。投屏结束时置 false，
-  /// 让音量键恢复控制本机媒体音量。
+  /// 让音量键恢复控制本机媒体音量，并释放 Android 投屏会话的 CPU 唤醒锁。
   Future<void> _setNativeVolumeCapture(bool active) async {
     if (!kIsWeb) {
       try {
@@ -327,8 +348,8 @@ class DlnaCastService {
   /// 选择一台设备并投屏当前歌曲。
   ///
   /// 若已在投屏则先断开旧设备（静默：不触发本机恢复，避免切设备时
-  /// 本机短暂出声）。默认使用原始流，不受本机解码引擎或转码阈值影响；
-  /// 明确的格式错误或确认启动失败时最多尝试一次服务器 MP3 HLS 转码。
+  /// 本机短暂出声）。先查询接收设备能力，再决定直传或转码；
+  /// 声明未知时先直传，沿用格式错误或确认启动失败后的一次性转码回退。
   /// 统一经 [MediaStreamProxy] 换签为匿名 URL。
   Future<bool> castTo(DlnaDevice device, SongEntity song) async {
     lastCastError = null;
@@ -463,6 +484,18 @@ class DlnaCastService {
     bool transcode = false,
   }) async {
     if (!isCurrent()) return false;
+    await _ensureCapabilities(device, isCurrent);
+    if (!isCurrent()) return false;
+    final format = await FeiNiuTranscodeService.instance.resolvedFormatFor(song);
+    if (!isCurrent()) return false;
+    final support = _capabilities.supportFor(song, format);
+    transcode = transcode || support == DlnaSupport.unsupported;
+    _log('media capability=${support.name} transcode=$transcode');
+    if (transcode && _capabilities.mp3HlsSupport == DlnaSupport.unsupported) {
+      lastCastError = '投屏设备不支持原格式，也未声明支持当前 MP3 HLS 转码流';
+      _log('no compatible server transcode transport');
+      return false;
+    }
     if (transcode) _transcodeAttempted = true;
     final proxyUrl = await _resolveCastUrl(
       song,
@@ -712,6 +745,8 @@ class DlnaCastService {
     final revision = ++_playbackRevision;
     _stopPositionPoll();
     _castSong = null;
+    _capabilities = DlnaCapabilities(null);
+    _capabilityDeviceUdn = null;
     _startupFallbackSuppressed = true;
     final discoveryStop = stopDiscovery();
     currentDevice.value = null;
