@@ -40,6 +40,7 @@ class MediaStreamProxy {
   String _proxyBase = '';
   String _upstreamUrl = '';
   Map<String, String> _upstreamHeaders = const {};
+  _MediaTransferState? _mediaTransfer;
 
   /// 额外资源注册表（封面图等）：token → 上游地址 + 认证头。
   /// 与主媒体流分离：主媒体流经 `/m/<token>/<mediaId>`，资源经 `/r/<resourceToken>`。
@@ -54,6 +55,10 @@ class MediaStreamProxy {
 
   /// 当前代理是否已注册了可用的上游媒体流。
   bool get hasMedia => _upstreamUrl.isNotEmpty;
+
+  bool get hasMediaData => _mediaTransfer?.hasData ?? false;
+
+  bool get hasMediaFailure => _mediaTransfer?.failed ?? false;
 
   /// 根据到渲染器的实际路由确定本机 IPv4，不依赖网卡枚举顺序。
   static Future<String> resolveLocalAddress(String host, int port) async {
@@ -146,6 +151,7 @@ class MediaStreamProxy {
     _upstreamUrl = upstreamUrl;
     _upstreamHeaders = Map.unmodifiable(headers);
     _mediaId = _generateToken();
+    _mediaTransfer = _MediaTransferState();
     final safeExtension = _sanitizeExtension(fileExtension);
     _log('registered media extension=$safeExtension');
     return '$base/m/$_token/$_mediaId/media.$safeExtension';
@@ -153,6 +159,7 @@ class MediaStreamProxy {
 
   /// 清空当前注册的媒体流（断开投屏时调用）。代理服务本身保留。
   void unregisterMedia() {
+    _mediaTransfer = null;
     _mediaId = null;
     _upstreamUrl = '';
     _upstreamHeaders = const {};
@@ -182,6 +189,7 @@ class MediaStreamProxy {
     _token = null;
     _mediaId = null;
     _proxyBase = '';
+    _mediaTransfer = null;
     _upstreamUrl = '';
     _upstreamHeaders = const {};
     _resources.clear();
@@ -241,6 +249,7 @@ class MediaStreamProxy {
         _upstreamHeaders,
         logResponse: isPrimaryMediaRequest,
         mediaProxyBase: '$_proxyBase/m/${pathSegments[1]}/${pathSegments[2]}',
+        transfer: _mediaTransfer,
       );
     } catch (e) {
       _log('handle error: ${_safeError(e)}');
@@ -258,6 +267,7 @@ class MediaStreamProxy {
     Map<String, String> headers, {
     bool logResponse = true,
     String? mediaProxyBase,
+    _MediaTransferState? transfer,
   }) async {
     final client = HttpClient();
     try {
@@ -288,6 +298,9 @@ class MediaStreamProxy {
         }
 
         final isM3u8 = _isM3u8(upResp, uri);
+        if (upResp.statusCode < 200 || upResp.statusCode >= 300) {
+          if (transfer != null) transfer.failed = true;
+        }
         final contentType = upResp.headers.value(HttpHeaders.contentTypeHeader);
         final contentLength = upResp.headers.value(
           HttpHeaders.contentLengthHeader,
@@ -323,12 +336,26 @@ class MediaStreamProxy {
         if (request.method == 'HEAD') {
           await response.close();
         } else {
-          await response.addStream(upResp);
+          await response.addStream(
+            upResp.map((bytes) {
+              if (transfer != null &&
+                  upResp.statusCode >= 200 &&
+                  upResp.statusCode < 300 &&
+                  bytes.isNotEmpty) {
+                transfer.hasData = true;
+              }
+              return bytes;
+            }),
+          );
           await response.close();
         }
         return;
       }
       _respondInternalError(request);
+      if (transfer != null) transfer.failed = true;
+    } catch (_) {
+      if (transfer != null) transfer.failed = true;
+      rethrow;
     } finally {
       client.close(force: true);
     }
@@ -440,4 +467,9 @@ class MediaStreamProxy {
     }
     return 'mp3';
   }
+}
+
+class _MediaTransferState {
+  bool hasData = false;
+  bool failed = false;
 }
