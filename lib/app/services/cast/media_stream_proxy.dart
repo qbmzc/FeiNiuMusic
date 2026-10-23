@@ -36,12 +36,13 @@ class MediaStreamProxy {
 
   HttpServer? _server;
   String? _token;
+  String? _mediaId;
   String _proxyBase = '';
   String _upstreamUrl = '';
   Map<String, String> _upstreamHeaders = const {};
 
   /// 额外资源注册表（封面图等）：token → 上游地址 + 认证头。
-  /// 与主媒体流分离：主媒体流经 `/m/<token>`，资源经 `/r/<resourceToken>`。
+  /// 与主媒体流分离：主媒体流经 `/m/<token>/<mediaId>`，资源经 `/r/<resourceToken>`。
   final Map<String, ({String url, Map<String, String> headers})> _resources =
       {};
 
@@ -129,7 +130,7 @@ class MediaStreamProxy {
   }
 
   /// 注册一条上游媒体流，返回渲染器可用的代理 URL
-  /// （`http://<ip>:<port>/m/<token>/media.<ext>`）。
+  /// （`http://<ip>:<port>/m/<token>/<mediaId>/media.<ext>`）。
   ///
   /// DLNA 插件会根据 URL 后缀生成 DIDL `protocolInfo`。保留真实后缀可避免
   /// FLAC/AAC 等直连流被错误声明为 `audio/mpeg`，部分严格渲染器会因此拒播。
@@ -143,14 +144,16 @@ class MediaStreamProxy {
     final base = proxyBase;
     if (base == null || _token == null) return null;
     _upstreamUrl = upstreamUrl;
-    _upstreamHeaders = headers;
+    _upstreamHeaders = Map.unmodifiable(headers);
+    _mediaId = _generateToken();
     final safeExtension = _sanitizeExtension(fileExtension);
     _log('registered media extension=$safeExtension');
-    return '$base/m/$_token/media.$safeExtension';
+    return '$base/m/$_token/$_mediaId/media.$safeExtension';
   }
 
   /// 清空当前注册的媒体流（断开投屏时调用）。代理服务本身保留。
   void unregisterMedia() {
+    _mediaId = null;
     _upstreamUrl = '';
     _upstreamHeaders = const {};
   }
@@ -177,6 +180,7 @@ class MediaStreamProxy {
     final server = _server;
     _server = null;
     _token = null;
+    _mediaId = null;
     _proxyBase = '';
     _upstreamUrl = '';
     _upstreamHeaders = const {};
@@ -205,10 +209,11 @@ class MediaStreamProxy {
         await _forward(request, res.url, res.headers);
         return;
       }
-      // 路由：/m/<token>[/...]?u=<目标URL>
-      if (pathSegments.length < 2 ||
+      // 路由：/m/<token>/<mediaId>[/...]?u=<目标URL>
+      if (pathSegments.length < 3 ||
           pathSegments[0] != 'm' ||
-          pathSegments[1] != _token) {
+          pathSegments[1] != _token ||
+          pathSegments[2] != _mediaId) {
         _respondNotFound(request);
         return;
       }
@@ -218,11 +223,9 @@ class MediaStreamProxy {
         return;
       }
 
-      // 分片/变体播放列表转发：/m/<token>?u=<urlencoded 绝对地址>
+      // 分片/变体播放列表转发：/m/<token>/<mediaId>?u=<urlencoded 绝对地址>
       final queryU = request.uri.queryParameters['u'];
-      final target = (queryU != null && queryU.isNotEmpty)
-          ? Uri.decodeComponent(queryU)
-          : upstream;
+      final target = (queryU != null && queryU.isNotEmpty) ? queryU : upstream;
 
       final isPrimaryMediaRequest = queryU == null;
       if (isPrimaryMediaRequest) {
@@ -237,6 +240,7 @@ class MediaStreamProxy {
         target,
         _upstreamHeaders,
         logResponse: isPrimaryMediaRequest,
+        mediaProxyBase: '$_proxyBase/m/${pathSegments[1]}/${pathSegments[2]}',
       );
     } catch (e) {
       _log('handle error: ${_safeError(e)}');
@@ -253,6 +257,7 @@ class MediaStreamProxy {
     String target,
     Map<String, String> headers, {
     bool logResponse = true,
+    String? mediaProxyBase,
   }) async {
     final client = HttpClient();
     try {
@@ -298,7 +303,7 @@ class MediaStreamProxy {
         if (isM3u8 && request.method != 'HEAD') {
           // HLS：读取 m3u8 文本，改写分片地址后整体返回
           final text = await upResp.transform(utf8.decoder).join();
-          final rewritten = _rewriteM3u8(text, uri);
+          final rewritten = _rewriteM3u8(text, uri, mediaProxyBase);
           final response = request.response;
           response.statusCode = HttpStatus.ok;
           response.headers.set(
@@ -349,11 +354,10 @@ class MediaStreamProxy {
   ///   解析成绝对地址，再编码进 `?u=`；
   /// - 标签行里的 `URI="..."`（`#EXT-X-MAP` 的 init 段、`#EXT-X-KEY`、变体
   ///   `#EXT-X-MEDIA` 等）：同样改写，保证渲染器能拉到所有子资源。
-  String _rewriteM3u8(String text, Uri baseUri) {
-    final token = _token;
-    if (token == null || _proxyBase.isEmpty) return text;
+  String _rewriteM3u8(String text, Uri baseUri, String? mediaProxyBase) {
+    if (mediaProxyBase == null) return text;
     String proxyUrl(String abs) =>
-        '$_proxyBase/m/$token?u=${Uri.encodeComponent(abs)}';
+        '$mediaProxyBase?u=${Uri.encodeComponent(abs)}';
     final lines = text.split('\n');
     final buffer = StringBuffer();
     for (final rawLine in lines) {
