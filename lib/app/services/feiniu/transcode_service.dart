@@ -476,6 +476,7 @@ class FeiNiuTranscodeService {
   /// 转码缓存，下次请求强制转码成 MP3。
   void markDowngradeToMp3(String songId) {
     _downgradedToMp3.add(songId);
+    _stopHeartbeat(songId);
     _removeCacheFor(songId);
   }
 
@@ -536,7 +537,6 @@ class FeiNiuTranscodeService {
       final hit = _cache[key];
       if (hit != null && hit.isValid()) {
         _activeIds.add(song.id);
-        _ensureHeartbeat(song.id);
         return hit.url;
       }
       // mp3 不带 bitrate（带 bitrate 会显著劣化音质）。
@@ -545,7 +545,6 @@ class FeiNiuTranscodeService {
       final url = _api.resolveHlsUrl(rel);
       _cache[key] = _CachedHls(url, DateTime.now().add(_ttl));
       _activeIds.add(song.id);
-      _ensureHeartbeat(song.id);
       return url;
     } catch (_) {
       return null;

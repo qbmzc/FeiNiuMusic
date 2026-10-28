@@ -467,12 +467,14 @@ void main() {
       await AppTranscodeSettings.setEnabled(true);
       await AppTranscodeSettings.setTranscodeAll(true);
       final heartbeats = <Map<String, dynamic>>[];
-      final heartbeatSeen = Completer<void>();
+      final twoHeartbeatsSeen = Completer<void>();
       FeiNiuApiClient.instance.setDioForTest(
         _mockDio((options) {
           if (options.path.contains('transcode/heartbeat')) {
             heartbeats.add(options.data as Map<String, dynamic>);
-            if (!heartbeatSeen.isCompleted) heartbeatSeen.complete();
+            if (heartbeats.length >= 2 && !twoHeartbeatsSeen.isCompleted) {
+              twoHeartbeatsSeen.complete();
+            }
           }
           return {
             'code': 0,
@@ -484,16 +486,14 @@ void main() {
       service.setHeartbeatIntervalForTest(const Duration(milliseconds: 20));
       await service.transcodeHlsUrlFor(_song('id-heartbeat', format: 'flac'));
 
-      await heartbeatSeen.future.timeout(const Duration(seconds: 1));
-      expect(heartbeats, hasLength(1));
-      expect(heartbeats.single, {
-        'guid': 'id-heartbeat',
-        'timestamp': 1,
-      });
+      await twoHeartbeatsSeen.future.timeout(const Duration(seconds: 1));
+      expect(heartbeats[0], {'guid': 'id-heartbeat', 'timestamp': 1});
+      expect(heartbeats[1], {'guid': 'id-heartbeat', 'timestamp': 2});
 
+      final countAtQuit = heartbeats.length;
       await service.quitFor('id-heartbeat');
       await Future<void>.delayed(const Duration(milliseconds: 60));
-      expect(heartbeats, hasLength(1), reason: 'quit 后应停止心跳');
+      expect(heartbeats, hasLength(countAtQuit), reason: 'quit 后应停止心跳');
     });
 
     test('master 关闭 → 不转码', () async {
