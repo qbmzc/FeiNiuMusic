@@ -1,28 +1,51 @@
-name: build-validation
-run-name: build-validation @ ${{ github.sha }}
+name: build-preview
+run-name: Preview build ${{ github.run_number }} @ ${{ github.sha }}
 
 on:
   push:
-    branches:
-      - perf/search-home-loading-20261004
+    branches: [preview]
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: build-validation-${{ github.ref }}
+  group: build-preview-${{ github.ref }}
   cancel-in-progress: true
 
 env:
-  # 与正式构建使用同一 Flutter 版本。
   FLUTTER_VERSION: c97838627ff5c275e9788839d427ab03eb1dfa01
+  PUB_HOSTED_URL: https://pub.flutter-io.cn
+  PREVIEW_BASE_SHA: 0ce23f11b4c72261aa604efc1308e5c188717007
 
 jobs:
-  build-android:
-    if: github.repository == 'qbmzc/FeiNiuMusic'
+  version:
+    if: github.repository == 'qbmzc/FeiNiuMusic' && github.ref == 'refs/heads/preview'
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      build_name: ${{ steps.version.outputs.build_name }}
+      build_number: ${{ steps.version.outputs.build_number }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prepare shared preview version
+        id: version
+        run: |
+          python3 -m unittest discover -s scripts -p 'test_*.py'
+          python3 scripts/prepare_preview.py --run-number "$GITHUB_RUN_NUMBER"
+
+  checks:
+    needs: version
+    uses: ./.github/workflows/ci.yml
+
+  android:
+    needs: [version, checks]
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+      BUILD_NAME: ${{ needs.version.outputs.build_name }}
+      BUILD_NUMBER: ${{ needs.version.outputs.build_number }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -35,28 +58,48 @@ jobs:
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: "17"
-      - run: flutter pub get
-      # DLNA 插件编译依赖 android-arm/flutter.jar，需预下载全部 Android 引擎。
+          java-version: '17'
+      - run: flutter pub get --enforce-lockfile
       - run: flutter precache --android
-      # 不注入正式签名，使用项目已有的 debug 签名回退，仅用于安装测试。
-      - name: Build release APKs with debug signing
-        run: flutter build apk --release --split-per-abi
+      - name: Configure existing Android signing
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          test -n "$ANDROID_KEYSTORE_BASE64"
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 -d > android/app/release.keystore
+      - name: Build signed preview APKs
+        env:
+          SIGNING_STORE_FILE: release.keystore
+          SIGNING_STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          SIGNING_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          SIGNING_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          flutter build apk --release --split-per-abi \
+            --build-name "$BUILD_NAME" --build-number "$BUILD_NUMBER" \
+            --dart-define="APP_PREVIEW_VERSION=$VERSION"
+          mkdir -p dist
+          for abi in arm64-v8a armeabi-v7a x86_64; do
+            cp "build/app/outputs/flutter-apk/app-$abi-release.apk" \
+              "dist/FeiNiuMusic-v$VERSION-Android-$abi.apk"
+          done
       - uses: actions/upload-artifact@v4
         with:
-          name: validation-android-debug-signed-${{ github.sha }}
-          path: build/app/outputs/flutter-apk/app-*-release.apk
+          name: preview-android
+          path: dist/*.apk
           if-no-files-found: error
-          retention-days: 14
+          retention-days: 1
 
-  build-windows:
-    if: github.repository == 'qbmzc/FeiNiuMusic'
+  windows:
+    needs: [version, checks]
     runs-on: windows-latest
     timeout-minutes: 60
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+      BUILD_NAME: ${{ needs.version.outputs.build_name }}
+      BUILD_NUMBER: ${{ needs.version.outputs.build_number }}
     steps:
       - uses: actions/checkout@v4
-      - name: Configure Git for Flutter SDK checkout
-        shell: pwsh
+      - name: Configure Windows paths
         run: |
           git config --global core.longpaths true
           git config --global core.symlinks false
@@ -65,21 +108,28 @@ jobs:
           channel: main
           flutter-version: ${{ env.FLUTTER_VERSION }}
           cache: true
-      - run: flutter pub get
-      - name: Build and package Windows
+      - run: flutter pub get --enforce-lockfile
+      - name: Build and package preview
         shell: pwsh
-        run: .\scripts\package_windows.ps1 -Build
+        run: |
+          flutter build windows --release --build-name $env:BUILD_NAME --build-number $env:BUILD_NUMBER "--dart-define=APP_PREVIEW_VERSION=$env:VERSION"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          .\scripts\package_windows.ps1 -Version $env:VERSION
       - uses: actions/upload-artifact@v4
         with:
-          name: validation-windows-${{ github.sha }}
+          name: preview-windows
           path: build/installer/FeiNiuMusic-v*-Windows.zip
           if-no-files-found: error
-          retention-days: 14
+          retention-days: 1
 
-  build-macos:
-    if: github.repository == 'qbmzc/FeiNiuMusic'
+  macos:
+    needs: [version, checks]
     runs-on: macos-latest
     timeout-minutes: 60
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+      BUILD_NAME: ${{ needs.version.outputs.build_name }}
+      BUILD_NUMBER: ${{ needs.version.outputs.build_number }}
     steps:
       - uses: actions/checkout@v4
       - uses: subosito/flutter-action@v2
@@ -87,28 +137,123 @@ jobs:
           channel: main
           flutter-version: ${{ env.FLUTTER_VERSION }}
           cache: true
-      - run: flutter pub get
-      - name: Test macOS Dock window restoration
+      - run: flutter pub get --enforce-lockfile
+      - name: Build and package preview
         run: |
-          flutter build macos --debug
-          xcodebuild test \
-            -workspace macos/Runner.xcworkspace \
-            -scheme Runner \
-            -configuration Debug \
-            -derivedDataPath build/macos \
-            -destination 'platform=macOS' \
-            -parallel-testing-enabled NO \
-            -only-testing:RunnerTests \
-            CODE_SIGNING_ALLOWED=NO
-      - run: flutter build macos --release
-      - name: Package macOS app
-        run: |
+          flutter build macos --release --build-name "$BUILD_NAME" --build-number "$BUILD_NUMBER" \
+            --dart-define="APP_PREVIEW_VERSION=$VERSION"
+          mkdir -p dist
           ditto -c -k --sequesterRsrc --keepParent \
             "build/macos/Build/Products/Release/飞牛音乐.app" \
-            "FeiNiuMusic-validation-MacOS.zip"
+            "dist/FeiNiuMusic-v$VERSION-MacOS.zip"
       - uses: actions/upload-artifact@v4
         with:
-          name: validation-macos-${{ github.sha }}
-          path: FeiNiuMusic-validation-MacOS.zip
+          name: preview-macos
+          path: dist/*.zip
           if-no-files-found: error
-          retention-days: 14
+          retention-days: 1
+
+  ios:
+    needs: [version, checks]
+    runs-on: macos-latest
+    timeout-minutes: 60
+    continue-on-error: true
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+      BUILD_NAME: ${{ needs.version.outputs.build_name }}
+      BUILD_NUMBER: ${{ needs.version.outputs.build_number }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: main
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          cache: true
+      - run: flutter pub get --enforce-lockfile
+      - name: Build unsigned iOS preview
+        run: |
+          flutter build ios --release --no-codesign --build-name "$BUILD_NAME" --build-number "$BUILD_NUMBER" \
+            --dart-define="APP_PREVIEW_VERSION=$VERSION"
+          mkdir -p build/preview-ipa/Payload dist
+          cp -R build/ios/iphoneos/Runner.app build/preview-ipa/Payload/
+          cd build/preview-ipa
+          ditto -c -k --sequesterRsrc --keepParent Payload \
+            "$GITHUB_WORKSPACE/dist/FeiNiuMusic-v$VERSION-iOS-unsigned.ipa"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: preview-ios
+          path: dist/*.ipa
+          if-no-files-found: error
+          retention-days: 1
+
+  publish:
+    needs: [version, android, windows, macos, ios]
+    if: >-
+      always() && !cancelled() &&
+      needs.version.result == 'success' &&
+      needs.android.result == 'success' &&
+      needs.windows.result == 'success' &&
+      needs.macos.result == 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: preview-*
+          merge-multiple: true
+          path: dist
+      - name: Publish downstream prerelease
+        run: |
+          git log --no-merges --pretty='- %s' "$PREVIEW_BASE_SHA..HEAD" > preview-notes.txt
+          cat >> preview-notes.txt <<EOF_NOTES
+
+          下游专用预览版，包含尚未全部合入上游的改动。
+          Commit: $GITHUB_SHA
+          Build: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID
+
+          macOS 未公证，首次启动需右键打开；iOS 包未签名，需自行签名。
+          EOF_NOTES
+          if gh release view "v$VERSION" >/dev/null 2>&1; then
+            gh release upload "v$VERSION" dist/* --clobber
+            gh release edit "v$VERSION" --title "FeiNiuMusic v$VERSION（预览版）" \
+              --notes-file preview-notes.txt --prerelease --latest=false
+          else
+            gh release create "v$VERSION" dist/* --target "$GITHUB_SHA" \
+              --title "FeiNiuMusic v$VERSION（预览版）" --notes-file preview-notes.txt \
+              --prerelease --latest=false
+          fi
+
+  cleanup-published-artifacts:
+    needs: publish
+    if: always() && needs.publish.result == 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+    steps:
+      - name: Remove intermediate artifacts after release upload
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const names = new Set(['preview-android', 'preview-windows', 'preview-macos', 'preview-ios']);
+            const artifacts = await github.paginate(github.rest.actions.listWorkflowRunArtifacts, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              run_id: context.runId,
+              per_page: 100,
+            });
+            for (const artifact of artifacts) {
+              if (!names.has(artifact.name)) continue;
+              await github.rest.actions.deleteArtifact({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                artifact_id: artifact.id,
+              });
+              core.info(`Deleted ${artifact.name} (${artifact.size_in_bytes} bytes)`);
+            }

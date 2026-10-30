@@ -135,6 +135,7 @@ android {
 }
 
 dependencies {
+    implementation("org.jupnp:org.jupnp.android:3.0.3")
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.5")
     implementation("io.github.proify.lyricon:provider:0.1.68")
     // Shizuku：歌词灵动岛焦点通知绕过系统白名单限制（ShizukuManager 等）。

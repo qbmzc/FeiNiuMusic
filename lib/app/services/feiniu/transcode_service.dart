@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 
 import '../network_connection_service.dart';
@@ -29,10 +31,19 @@ class FeiNiuTranscodeService {
 
   /// 需服务器转码（本地 ExoPlayer 不支持）的格式黑名单。
   static const Set<String> unsupportedFormats = {
-    'dsf', 'dff', 'dsd',
-    'wma', 'ape', 'dts',
-    'aiff', 'ra', 'au',
-    'dvf', 'tta', 'dss', 'mmf',
+    'dsf',
+    'dff',
+    'dsd',
+    'wma',
+    'ape',
+    'dts',
+    'aiff',
+    'ra',
+    'au',
+    'dvf',
+    'tta',
+    'dss',
+    'mmf',
   };
 
   /// 交给 media_kit（FFmpeg）解码的格式：黑名单格式（DSF/APE/WMA…）。
@@ -54,7 +65,12 @@ class FeiNiuTranscodeService {
   /// `eac3`/`ac3`：杜比数字（Plus）；`alac`：Apple 无损；`dts`/`truehd`/`mlp`：
   /// 家庭影院环绕编码。
   static const Set<String> mediaKitCodecs = {
-    'eac3', 'ac3', 'alac', 'dts', 'truehd', 'mlp',
+    'eac3',
+    'ac3',
+    'alac',
+    'dts',
+    'truehd',
+    'mlp',
   };
 
   /// codec 是否为 media_kit 专属（ExoPlayer 设备解码不可靠）。
@@ -66,7 +82,15 @@ class FeiNiuTranscodeService {
   /// 可能内嵌风险 codec（EAC3/ALAC…）的容器格式。codec 未知（null）时，
   /// 这些容器需要无声看门狗兜底。
   static const Set<String> riskySilenceContainers = {
-    'm4a', 'm4b', 'm4p', 'mp4', 'aac', 'mov', '3gp', 'mka', 'mkv',
+    'm4a',
+    'm4b',
+    'm4p',
+    'mp4',
+    'aac',
+    'mov',
+    '3gp',
+    'mka',
+    'mkv',
   };
 
   /// 容器是否可能内嵌风险 codec（codec 未知时据此判断是否需要看门狗）。
@@ -81,33 +105,97 @@ class FeiNiuTranscodeService {
   /// 纯属浪费服务器带宽，直接直连原始流即可；无损→无损（wav→flac 等）也
   /// 无压缩收益，一律直连。
   static const Set<String> losslessFormats = {
-    'flac', 'wav', 'alac', 'ape', 'aiff', 'aif',
-    'dsf', 'dff', 'dsd', 'dts', 'truehd', 'mlp',
-    'tta', 'wv', 'wavpack', 'shn', 'tak', 'ofr', 'wmal',
+    'flac',
+    'wav',
+    'alac',
+    'ape',
+    'aiff',
+    'aif',
+    'dsf',
+    'dff',
+    'dsd',
+    'dts',
+    'truehd',
+    'mlp',
+    'tta',
+    'wv',
+    'wavpack',
+    'shn',
+    'tak',
+    'ofr',
+    'wmal',
   };
 
   /// 有损「现代」源格式（质量层 2）：opus/ogg/aac/m4a 等，效率高于 mp3。
   static const Set<String> modernLossyFormats = {
-    'opus', 'ogg', 'oga', 'aac', 'm4a', 'm4b', 'm4p', 'mp4',
-    'webm', 'ac3', 'eac3',
+    'opus',
+    'ogg',
+    'oga',
+    'aac',
+    'm4a',
+    'm4b',
+    'm4p',
+    'mp4',
+    'webm',
+    'ac3',
+    'eac3',
   };
 
   /// 有损「传统」源格式（质量层 1）：mp3/wma 等。
   static const Set<String> legacyLossyFormats = {
-    'mp3', 'mp2', 'mp1', 'wma', 'wmv', 'ra', 'au', 'dvf', 'dss', 'mmf', 'amr',
+    'mp3',
+    'mp2',
+    'mp1',
+    'wma',
+    'wmv',
+    'ra',
+    'au',
+    'dvf',
+    'dss',
+    'mmf',
+    'amr',
   };
 
   /// 无损 codec（质量层 3）：alac/truehd/mlp 等常内嵌在 m4a/mp4 有损容器里，
   /// 需按 codec 判定源质量，不能只看容器格式。
   static const Set<String> losslessCodecs = {
-    'flac', 'alac', 'ape', 'wavpack', 'wv', 'dsd', 'dts', 'truehd', 'mlp',
-    'tta', 'shn', 'tak', 'ofr', 'pcm', 'lpcm', 'wmal',
+    'flac',
+    'alac',
+    'ape',
+    'wavpack',
+    'wv',
+    'dsd',
+    'dts',
+    'truehd',
+    'mlp',
+    'tta',
+    'shn',
+    'tak',
+    'ofr',
+    'pcm',
+    'lpcm',
+    'wmal',
   };
 
   /// 有损 codec（质量层 2/1）。
   static const Set<String> lossyCodecs = {
-    'mp3', 'mp2', 'mp1', 'aac', 'ac3', 'eac3', 'opus', 'vorbis', 'ogg',
-    'wma', 'wmav1', 'wmav2', 'amr', 'adpcm', 'g711', 'speex', 'nellymoser',
+    'mp3',
+    'mp2',
+    'mp1',
+    'aac',
+    'ac3',
+    'eac3',
+    'opus',
+    'vorbis',
+    'ogg',
+    'wma',
+    'wmav1',
+    'wmav2',
+    'amr',
+    'adpcm',
+    'g711',
+    'speex',
+    'nellymoser',
   };
 
   /// 源格式质量层：3=无损，2=有损现代，1=有损传统，0=未知（不拦截）。
@@ -174,6 +262,13 @@ class FeiNiuTranscodeService {
 
   /// 当前活动转码会话（服务端正在转码的 guid）。
   final Set<String> _activeIds = {};
+
+  /// 服务端转码会话约 160 秒无活动会被清理，活动期间需要周期续期。
+  final Map<String, Timer> _heartbeatTimers = {};
+  final Map<String, int> _heartbeatTimestamps = {};
+
+  static const Duration _heartbeatInterval = Duration(seconds: 30);
+  Duration _heartbeatIntervalForTest = _heartbeatInterval;
 
   /// 已降级到 mp3 的歌（flac 转码解析失败后，本会话不再尝试 flac）。
   final Set<String> _downgradedToMp3 = {};
@@ -381,6 +476,7 @@ class FeiNiuTranscodeService {
   /// 转码缓存，下次请求强制转码成 MP3。
   void markDowngradeToMp3(String songId) {
     _downgradedToMp3.add(songId);
+    _stopHeartbeat(songId);
     _removeCacheFor(songId);
   }
 
@@ -402,6 +498,7 @@ class FeiNiuTranscodeService {
       final hit = _cache[key];
       if (hit != null && hit.isValid()) {
         _activeIds.add(song.id);
+        _ensureHeartbeat(song.id);
         return hit.url;
       }
       // 只有 flac 带 bitrate（320）；mp3/opus 不带——带 bitrate 会劣化音质。
@@ -416,6 +513,7 @@ class FeiNiuTranscodeService {
       final url = _api.resolveHlsUrl(rel);
       _cache[key] = _CachedHls(url, DateTime.now().add(_ttl));
       _activeIds.add(song.id);
+      _ensureHeartbeat(song.id);
       return url;
     } catch (_) {
       // 任何失败（转码请求异常等）→ 返回 null，由调用方退直连，不阻塞播放。
@@ -430,9 +528,9 @@ class FeiNiuTranscodeService {
 
   /// 获取某首歌的 **MP3 转码 HLS** 绝对地址（供 DLNA 投屏使用）。
   ///
-  /// 渲染器通常无法解码 FLAC/DSF/APE 等无损格式，投屏时优先转码成 MP3。
+  /// DLNA 默认投送原始流，确认不兼容时调用此方法获取一次备用流。
   /// - 转码成功 → 按 `songId|mp3` 缓存（TTL）并登记活动会话，返回绝对 URL；
-  /// - 网络异常 / 服务器未返回地址 → 返回 null（调用方退直连）。
+  /// - 网络异常 / 服务器未返回地址 → 返回 null，由调用方结束备用尝试。
   Future<String?> transcodeMp3UrlFor(SongEntity song) async {
     try {
       final key = _cacheKey(song.id, 'mp3');
@@ -449,7 +547,6 @@ class FeiNiuTranscodeService {
       _activeIds.add(song.id);
       return url;
     } catch (_) {
-      // 任何失败 → 返回 null，由调用方退直连，不阻塞投屏。
       return null;
     }
   }
@@ -469,10 +566,36 @@ class FeiNiuTranscodeService {
     return codec.toUpperCase();
   }
 
+  void _ensureHeartbeat(String songId) {
+    if (_heartbeatTimers.containsKey(songId)) return;
+    _heartbeatTimestamps[songId] = 0;
+    _heartbeatTimers[songId] = Timer.periodic(_heartbeatIntervalForTest, (_) {
+      final timestamp = (_heartbeatTimestamps[songId] ?? 0) + 1;
+      _heartbeatTimestamps[songId] = timestamp;
+      unawaited(
+        _api.trackTranscodeHeartbeat(songId, timestamp: timestamp).catchError((
+          Object error,
+        ) {
+          if (kDebugMode) {
+            debugPrint(
+              '[TranscodeService] heartbeat failed for $songId: $error',
+            );
+          }
+        }),
+      );
+    });
+  }
+
+  void _stopHeartbeat(String songId) {
+    _heartbeatTimers.remove(songId)?.cancel();
+    _heartbeatTimestamps.remove(songId);
+  }
+
   Future<void> _quitIds(Iterable<String> ids) async {
     final unique = ids.toSet();
     for (final id in unique) {
       _activeIds.remove(id);
+      _stopHeartbeat(id);
       _removeCacheFor(id);
     }
     for (final id in unique) {
@@ -574,6 +697,7 @@ class FeiNiuTranscodeService {
     _codecs.remove(songId);
     _sizes.remove(songId);
     _activeIds.remove(songId);
+    _stopHeartbeat(songId);
   }
 
   String _cacheKey(String songId, String codec) => '$songId|$codec';
@@ -652,7 +776,18 @@ class FeiNiuTranscodeService {
   void setApiForTest(FeiNiuApiClient api) => _api = api;
 
   @visibleForTesting
+  void setHeartbeatIntervalForTest(Duration interval) {
+    _heartbeatIntervalForTest = interval;
+  }
+
+  @visibleForTesting
   void clearCacheForTest() {
+    for (final timer in _heartbeatTimers.values) {
+      timer.cancel();
+    }
+    _heartbeatTimers.clear();
+    _heartbeatTimestamps.clear();
+    _heartbeatIntervalForTest = _heartbeatInterval;
     _cache.clear();
     _formatInflight.clear();
     _formats.clear();
@@ -665,6 +800,12 @@ class FeiNiuTranscodeService {
 
   @visibleForTesting
   void resetForTest() {
+    for (final timer in _heartbeatTimers.values) {
+      timer.cancel();
+    }
+    _heartbeatTimers.clear();
+    _heartbeatTimestamps.clear();
+    _heartbeatIntervalForTest = _heartbeatInterval;
     _api = FeiNiuApiClient.instance;
     _cache.clear();
     _formatInflight.clear();

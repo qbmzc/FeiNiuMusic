@@ -376,8 +376,9 @@ class PlayerService with WidgetsBindingObserver {
         NetworkConnectionService.instance.isWifiConnected;
     if (active == _wifiDirectPolicyActive) return;
     _wifiDirectPolicyActive = active;
-    if (queue.value.isEmpty || currentIndex.value < 0 || isCasting.value)
+    if (queue.value.isEmpty || currentIndex.value < 0 || isCasting.value) {
       return;
+    }
     _networkRouteRefreshTimer?.cancel();
     _networkRouteRefreshTimer = Timer(const Duration(milliseconds: 500), () {
       unawaited(_refreshNetworkTranscodeRoute());
@@ -459,7 +460,9 @@ class PlayerService with WidgetsBindingObserver {
       _persistPlaybackStateNow();
       _statsService.flush();
       _recorder.onLifecyclePause();
-      if (isPlaying.value) {
+      // 投屏时 isPlaying 代表渲染器状态；本机引擎已暂停，不需要用音频会话
+      // 保活，否则 Android 会反复 setActive(true)，可能触发音频焦点中断。
+      if (isPlaying.value && !isCasting.value) {
         _startBackgroundAudioKeepAlive();
       }
       return;
@@ -3422,6 +3425,7 @@ class PlayerService with WidgetsBindingObserver {
   }
 
   void _startBackgroundAudioKeepAliveIfNeeded() {
+    if (isCasting.value) return;
     final lifecycle = WidgetsBinding.instance.lifecycleState;
     if (lifecycle == AppLifecycleState.paused ||
         lifecycle == AppLifecycleState.hidden) {
@@ -3434,7 +3438,9 @@ class PlayerService with WidgetsBindingObserver {
     _backgroundAudioKeepAliveTimer = Timer.periodic(
       const Duration(seconds: 25),
       (_) {
-        if (!isPlaying.value) {
+        // 生命周期切换后可能已经开始投屏；停止本机音频会话保活，避免
+        // 将渲染器的播放状态误认为本机仍在播放。
+        if (!isPlaying.value || isCasting.value) {
           _stopBackgroundAudioKeepAlive();
           return;
         }

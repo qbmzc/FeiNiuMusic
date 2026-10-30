@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../../app/state/settings_layout_state.dart';
 import '../../../app/tv/tv_layout.dart';
+import 'home_panel.dart';
 
 /// 首页功能入口卡片数据
 class HomeShortcutItem {
@@ -23,7 +24,7 @@ class HomeShortcutItem {
 /// 首页快捷菜单 — 歌曲 / 歌手 / 专辑 / 风格。
 ///
 /// 默认 4×1 一行排列（手机端）；`grid2x2` 时改为 2×2 四宫格（大屏顶部右侧），
-/// 每个条目是圆形图标 + 文字标签，点击跳对应库页面。
+/// 每个条目是图标槽 + 文字标签，点击跳对应库页面。
 class HomeShortcutMenu extends StatelessWidget {
   final List<HomeShortcutItem> items;
 
@@ -53,6 +54,7 @@ class HomeShortcutMenu extends StatelessWidget {
                     child: _ShortcutItem(
                       item: items[r * 2 + c],
                       scheme: scheme,
+                      embedded: true,
                     ),
                   ),
                 ],
@@ -78,8 +80,13 @@ class HomeShortcutMenu extends StatelessWidget {
 class _ShortcutItem extends StatelessWidget {
   final HomeShortcutItem item;
   final ColorScheme scheme;
+  final bool embedded;
 
-  const _ShortcutItem({required this.item, required this.scheme});
+  const _ShortcutItem({
+    required this.item,
+    required this.scheme,
+    this.embedded = false,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -91,12 +98,9 @@ class _ShortcutItem extends StatelessWidget {
     // 四宫格项是 Material + InkWell：本身可聚焦（Material 自带焦点环 +
     // 主题 focusColor 高亮），聚焦范围即完整卡片。不再包 TvFocusable
     // 缩放/描边，避免聚焦范围只剩图标一小块、右侧空白。
-    return Material(
-      color: Colors.transparent,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(18),
-        side: BorderSide(color: scheme.outlineVariant.withValues(alpha: .22)),
-      ),
+    return HomePanel(
+      color: embedded ? Colors.transparent : null,
+      borderRadius: BorderRadius.circular(18),
       child: InkWell(
         borderRadius: BorderRadius.circular(16),
         onTap: item.onTap,
@@ -105,7 +109,7 @@ class _ShortcutItem extends StatelessWidget {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              // 圆形图标容器
+              // 渐变图标槽
               Container(
                 width: iconSize,
                 height: iconSize,
