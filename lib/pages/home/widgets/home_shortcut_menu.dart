@@ -24,7 +24,7 @@ class HomeShortcutItem {
 /// 首页快捷菜单 — 歌曲 / 歌手 / 专辑 / 风格。
 ///
 /// 默认 4×1 一行排列（手机端）；`grid2x2` 时改为 2×2 四宫格（大屏顶部右侧），
-/// 每个条目是圆形图标 + 文字标签，点击跳对应库页面。
+/// 每个条目是图标槽 + 文字标签，点击跳对应库页面。
 class HomeShortcutMenu extends StatelessWidget {
   final List<HomeShortcutItem> items;
 
@@ -100,7 +100,7 @@ class _ShortcutItem extends StatelessWidget {
     // 缩放/描边，避免聚焦范围只剩图标一小块、右侧空白。
     return HomePanel(
       color: embedded ? Colors.transparent : null,
-      borderRadius: BorderRadius.circular(16),
+      borderRadius: BorderRadius.circular(18),
       child: InkWell(
         borderRadius: BorderRadius.circular(16),
         onTap: item.onTap,
@@ -109,13 +109,21 @@ class _ShortcutItem extends StatelessWidget {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              // 圆形图标容器
+              // 渐变图标槽
               Container(
                 width: iconSize,
                 height: iconSize,
                 decoration: BoxDecoration(
-                  color: accent.withValues(alpha: 0.12),
-                  shape: BoxShape.circle,
+                  gradient: LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: [
+                      accent.withValues(alpha: .18),
+                      scheme.surfaceContainerHigh.withValues(alpha: .5),
+                    ],
+                  ),
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: accent.withValues(alpha: .18)),
                 ),
                 child: Icon(item.icon, size: iconSize * 0.5, color: accent),
               ),
