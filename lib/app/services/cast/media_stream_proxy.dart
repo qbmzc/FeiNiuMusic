@@ -60,7 +60,12 @@ class MediaStreamProxy {
 
   bool get hasMediaFailure => _mediaTransfer?.failed ?? false;
 
-  /// 根据到渲染器的实际路由确定本机 IPv4，不依赖网卡枚举顺序。
+  /// 选出渲染器可达的本机 IPv4，作为媒体代理对外通告的 host。
+  ///
+  /// 不能用 `Socket.address` 选址：它的文档语义是「本 socket 用来连接的地址」
+  /// （即远端目标），`dart:io` 没有暴露内核选定的源地址，1.6.9 因此把渲染器
+  /// 自己的 IP 通告成了媒体 host，跨机投送全部拉不到流。这里改为逐个本机地址
+  /// 显式绑定探测，并按与渲染器的地址亲缘度排序。
   static Future<String> resolveLocalAddress(String host, int port) async {
     if (host.isEmpty || port < 1 || port > 65535) {
       throw ArgumentError('Invalid renderer endpoint');
@@ -77,8 +82,7 @@ class MediaStreamProxy {
     SocketException? lastError;
     for (final ip in candidates) {
       try {
-        // Socket.address is the remote endpoint. Bind each candidate explicitly
-        // so the selected address is the phone's reachable LAN interface.
+        // 显式绑定候选地址：连上即证明这条路能走到渲染器，且这个地址确实属于本机。
         final socket = await Socket.connect(
           host,
           port,
@@ -105,11 +109,11 @@ class MediaStreamProxy {
 
   /// 候选本机地址的探测顺序：与渲染器网段最接近的先试，同分保持原枚举顺序。
   ///
-  /// 连通性探测只证明「本机 → 渲染器」这条路走得通，不证明渲染器能反向拉流：
-  /// VPN/蜂窝这类地址常常是单向可达，先试通就会把渲染器取不到的 host 通告出去
-  /// （issue #118 最初的症状就是通告了覆盖网地址 10.111.15.232）。另外每个探
-  /// 不通的候选都要等 3s connect 超时，顺序也直接决定起播耗时。
-  /// 回环地址只在渲染器本身就是本机回环时保留，否则一定拉不到。
+  /// 连通性探测只证明「本机 → 渲染器」走得通，不证明渲染器能反向拉流：VPN/蜂窝
+  /// 这类地址常常单向可达，先试通就会把渲染器取不到的 host 通告出去（issue #118
+  /// 最初的症状就是通告了覆盖网地址 10.111.15.232）。回环只在渲染器本身就是本机
+  /// 回环时保留，否则远程设备一定拉不到。另外每个探不通的候选都要等 3s connect
+  /// 超时，顺序也直接决定起播耗时。
   @visibleForTesting
   static List<String> orderCandidates(
     String rendererHost,
