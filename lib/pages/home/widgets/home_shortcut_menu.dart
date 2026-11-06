@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../../app/state/settings_layout_state.dart';
 import '../../../app/tv/tv_layout.dart';
+import 'home_panel.dart';
 
 /// 首页功能入口卡片数据
 class HomeShortcutItem {
@@ -53,6 +54,7 @@ class HomeShortcutMenu extends StatelessWidget {
                     child: _ShortcutItem(
                       item: items[r * 2 + c],
                       scheme: scheme,
+                      embedded: true,
                     ),
                   ),
                 ],
@@ -78,8 +80,13 @@ class HomeShortcutMenu extends StatelessWidget {
 class _ShortcutItem extends StatelessWidget {
   final HomeShortcutItem item;
   final ColorScheme scheme;
+  final bool embedded;
 
-  const _ShortcutItem({required this.item, required this.scheme});
+  const _ShortcutItem({
+    required this.item,
+    required this.scheme,
+    this.embedded = false,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -91,39 +98,55 @@ class _ShortcutItem extends StatelessWidget {
     // 四宫格项是 Material + InkWell：本身可聚焦（Material 自带焦点环 +
     // 主题 focusColor 高亮），聚焦范围即完整卡片。不再包 TvFocusable
     // 缩放/描边，避免聚焦范围只剩图标一小块、右侧空白。
-    return Material(
-      color: scheme.surfaceContainerLow,
-      borderRadius: BorderRadius.circular(16),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(16),
-        onTap: item.onTap,
-        child: Padding(
-          padding: EdgeInsets.symmetric(vertical: 12 * scale),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              // 圆形图标容器
-              Container(
-                width: iconSize,
-                height: iconSize,
-                decoration: BoxDecoration(
-                  color: accent.withValues(alpha: 0.12),
-                  shape: BoxShape.circle,
+    return HomePanel(
+      color: embedded ? Colors.transparent : null,
+      borderRadius: BorderRadius.circular(18),
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(
+            color: scheme.outlineVariant.withValues(alpha: .22),
+          ),
+        ),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(16),
+          onTap: item.onTap,
+          child: Padding(
+            padding: EdgeInsets.symmetric(vertical: 12 * scale),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // 圆形图标容器
+                Container(
+                  width: iconSize,
+                  height: iconSize,
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                      colors: [
+                        accent.withValues(alpha: .18),
+                        scheme.surfaceContainerHigh.withValues(alpha: .5),
+                      ],
+                    ),
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(color: accent.withValues(alpha: .18)),
+                  ),
+                  child: Icon(item.icon, size: iconSize * 0.5, color: accent),
                 ),
-                child: Icon(item.icon, size: iconSize * 0.5, color: accent),
-              ),
-              SizedBox(height: 6 * scale),
-              Text(
-                item.label,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  fontSize: 12 * scale,
-                  fontWeight: FontWeight.w600,
-                  color: scheme.onSurfaceVariant,
+                SizedBox(height: 6 * scale),
+                Text(
+                  item.label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 12 * scale,
+                    fontWeight: FontWeight.w600,
+                    color: scheme.onSurfaceVariant,
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),
