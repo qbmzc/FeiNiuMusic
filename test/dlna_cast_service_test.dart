@@ -300,4 +300,17 @@ void main() {
     }
     expect(api.titles, ['first', 'next-1', 'next-2']);
   });
+
+  test('等待下一曲期间进度回退不会重复触发完成事件', () async {
+    var completions = 0;
+    var polls = 0;
+    service.onCastCompleted = () => completions++;
+    api.onPoll = () async {
+      polls++;
+      return _info(TransportState.playing, polls == 3 ? 150 : 200);
+    };
+    await service.loadSong(_song('first'));
+    await _waitUntil(() => polls >= 5, timeout: const Duration(seconds: 7));
+    expect(completions, 1);
+  });
 }

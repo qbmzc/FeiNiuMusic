@@ -93,6 +93,9 @@ class DlnaCastService {
   static const MethodChannel _volumeChannel = MethodChannel(
     'com.feiniu.music/cast_volume',
   );
+  static const MethodChannel _networkChannel = MethodChannel(
+    'com.feiniu.music/cast_network',
+  );
   bool _volumeHandlerRegistered = false;
 
   /// 当前投屏设备的音量（0-100，投屏遥控用）。-1 表示未知。
@@ -229,6 +232,15 @@ class DlnaCastService {
       } catch (_) {
         // 非 Android 或通道不可用时静默忽略
       }
+    }
+  }
+
+  Future<void> _setNativeNetworkActive(bool active) async {
+    if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) return;
+    try {
+      await _networkChannel.invokeMethod<void>('setActive', {'active': active});
+    } catch (e) {
+      _log('network lock active=$active failed: ${_safeError(e)}');
     }
   }
 
@@ -404,6 +416,7 @@ class DlnaCastService {
       if (!accepted) {
         _log('cast aborted: no castable URL');
         await MediaStreamProxy.instance.stop();
+        await _setNativeNetworkActive(false);
         return false;
       }
       currentDevice.value = device;
@@ -431,6 +444,7 @@ class DlnaCastService {
           DlnaActionFailure.from(e)?.userMessage ?? '投屏加载失败，请检查设备和网络后重试';
       _log('cast failed: ${_safeError(e)}');
       await MediaStreamProxy.instance.stop();
+      await _setNativeNetworkActive(false);
       return false;
     }
   }
@@ -483,6 +497,8 @@ class DlnaCastService {
     required bool Function() isCurrent,
     bool transcode = false,
   }) async {
+    if (!isCurrent()) return false;
+    await _setNativeNetworkActive(true);
     if (!isCurrent()) return false;
     await _ensureCapabilities(device, isCurrent);
     if (!isCurrent()) return false;
@@ -615,6 +631,7 @@ class DlnaCastService {
     final device = currentDevice.value;
     if (device == null) return;
     try {
+      await _setNativeNetworkActive(true);
       await _api.play(device.udn);
     } catch (e) {
       if (kDebugMode) debugPrint('[DlnaCastService] play failed: $e');
@@ -627,6 +644,7 @@ class DlnaCastService {
     _startupFallbackSuppressed = true;
     try {
       await _api.pause(device.udn);
+      await _setNativeNetworkActive(false);
     } catch (e) {
       if (kDebugMode) debugPrint('[DlnaCastService] pause failed: $e');
     }
@@ -769,6 +787,8 @@ class DlnaCastService {
     state.value = DlnaCastState.idle;
     await MediaStreamProxy.instance.stop();
     if (revision != _playbackRevision) return;
+    await _setNativeNetworkActive(false);
+    if (revision != _playbackRevision) return;
     if (wasCasting && !silent) {
       onCastDisconnect?.call();
       if (reason != null && kDebugMode) {
@@ -907,10 +927,9 @@ class DlnaCastService {
         if (completed) {
           if (!_castCompletedNotified) {
             _castCompletedNotified = true;
+            _log('renderer completed; advancing queue');
             onCastCompleted?.call();
           }
-        } else {
-          _castCompletedNotified = false;
         }
       } catch (e) {
         if (!isCurrent()) return;

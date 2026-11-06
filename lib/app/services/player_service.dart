@@ -539,6 +539,8 @@ class PlayerService with WidgetsBindingObserver {
     cast.onCastStart = () {
       _debugLog('cast start -> pause local engine');
       isCasting.value = true;
+      isPlaying.value = cast.castPlaying.value;
+      _emitSnapshot(force: true);
       unawaited(_pausePlayback());
     };
     cast.onCastProgress = (position, playing) {
@@ -3628,7 +3630,7 @@ class PlayerService with WidgetsBindingObserver {
   }
 
   void _syncPositionFromPlayer({bool allowZeroOverride = true}) {
-    if (_isSeeking) return;
+    if (_isSeeking || isCasting.value) return;
     final playerPosition = _activeEngine.position;
     if (playerPosition < Duration.zero) return;
     if (!allowZeroOverride &&
