@@ -424,7 +424,7 @@ class _DesktopLyricsSurfaceState extends State<_DesktopLyricsSurface>
             top: _lockInset,
             right: _lockInset,
             child: AnimatedOpacity(
-              opacity: _hovered ? 1 : (_locked ? 0.45 : 0),
+              opacity: _hovered ? 1 : 0,
               duration: const Duration(milliseconds: 150),
               child: Material(
                 type: MaterialType.transparency,
