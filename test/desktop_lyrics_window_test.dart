@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:feiniu_music/pages/player/desktop_lyrics_window.dart';
@@ -7,7 +6,7 @@ import 'package:feiniu_music/pages/player/desktop_lyrics_window.dart';
 Map<String, Object?> _payload({
   bool karaoke = false,
   String? fontFamily = 'PingFang SC',
-  String position = 'free',
+  String position = 'fixed',
 }) {
   return {
     'currentLine': '当前歌词',
@@ -18,6 +17,7 @@ Map<String, Object?> _payload({
     'fontSize': 24.0,
     'textColor': 0xFFFFFFFF,
     'highlightColor': 0xFF59F7E7,
+    'backgroundOpacity': 0.64,
     'position': position,
   };
 }
@@ -39,31 +39,6 @@ List<TextStyle> _resolvedStylesOf(WidgetTester tester, String text) {
 }
 
 void main() {
-  TestWidgetsFlutterBinding.ensureInitialized();
-
-  testWidgets('直接点击歌词窗口的小锁即可请求锁定', (tester) async {
-    const channel = MethodChannel('window_manager');
-    final messenger = tester.binding.defaultBinaryMessenger;
-    messenger.setMockMethodCallHandler(channel, (_) async => true);
-    addTearDown(() => messenger.setMockMethodCallHandler(channel, null));
-    final state = DesktopLyricsWindowState()..update(_payload());
-    bool? requestedLock;
-
-    await tester.pumpWidget(
-      DesktopLyricsWindow(
-        state: state,
-        onLockChanged: (locked) async {
-          requestedLock = locked;
-        },
-      ),
-    );
-    await tester.tap(find.byKey(const ValueKey('desktop-lyrics-lock')));
-    await tester.pump();
-
-    expect(requestedLock, isTrue);
-    await tester.pumpWidget(const SizedBox.shrink());
-  });
-
   testWidgets('歌词不继承 MaterialApp 兜底样式的下划线', (tester) async {
     final state = DesktopLyricsWindowState()..update(_payload());
 
@@ -125,34 +100,17 @@ void main() {
     expect(highlight.width, closeTo(base.width, 0.5));
   });
 
-  testWidgets('忽略旧透明度配置，歌词始终没有背景或边框', (tester) async {
-    final state = DesktopLyricsWindowState()
-      ..update({..._payload(), 'backgroundOpacity': 0.9});
+  testWidgets('固定位置不接收拖动手势', (tester) async {
+    final state = DesktopLyricsWindowState()..update(_payload());
 
     await tester.pumpWidget(DesktopLyricsWindow(state: state));
 
     final gesture = tester.widget<GestureDetector>(
-      find.byKey(const ValueKey('desktop-lyrics-drag-area')),
-    );
-    final container = gesture.child! as Container;
-    expect(container.color, isNull);
-    expect(container.decoration, isNull);
-    expect(find.byTooltip('锁定歌词位置'), findsOneWidget);
-  });
-
-  testWidgets('锁定后不接收拖动手势且可以找到解锁按钮', (tester) async {
-    final state = DesktopLyricsWindowState()
-      ..update(_payload(position: 'locked'));
-
-    await tester.pumpWidget(DesktopLyricsWindow(state: state));
-
-    final gesture = tester.widget<GestureDetector>(
-      find.byKey(const ValueKey('desktop-lyrics-drag-area')),
+      find.byType(GestureDetector),
     );
     expect(gesture.onPanStart, isNull);
     expect(gesture.onPanUpdate, isNull);
     expect(gesture.onPanEnd, isNull);
-    expect(find.byTooltip('解锁歌词'), findsOneWidget);
   });
 
   testWidgets('只有自由拖动模式接收拖动手势', (tester) async {
@@ -162,7 +120,7 @@ void main() {
     await tester.pumpWidget(DesktopLyricsWindow(state: state));
 
     final gesture = tester.widget<GestureDetector>(
-      find.byKey(const ValueKey('desktop-lyrics-drag-area')),
+      find.byType(GestureDetector),
     );
     expect(gesture.onPanStart, isNotNull);
     expect(gesture.onPanUpdate, isNotNull);

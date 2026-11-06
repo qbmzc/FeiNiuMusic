@@ -40,12 +40,6 @@ class DesktopLyricsService {
       if (call.method == 'ready') {
         _windowReady = true;
         _queueSync();
-      } else if (call.method == 'setLocked' && call.arguments is bool) {
-        await DesktopLyricsSettings.setPosition(
-          call.arguments == true
-              ? DesktopLyricsSettings.positionLocked
-              : DesktopLyricsSettings.positionFree,
-        );
       } else if (call.method == 'draggedPosition' && call.arguments is Map) {
         final arguments = Map<String, Object?>.from(call.arguments as Map);
         final x = (arguments['x'] as num?)?.toDouble();
@@ -63,6 +57,7 @@ class DesktopLyricsService {
       DesktopLyricsSettings.fontSize,
       DesktopLyricsSettings.textColor,
       DesktopLyricsSettings.highlightColor,
+      DesktopLyricsSettings.backgroundOpacity,
       DesktopLyricsSettings.position,
       LyricsService.instance.currentLineText,
       LyricsService.instance.controller.activeIndexNotifiter,
@@ -188,6 +183,7 @@ class DesktopLyricsService {
           'fontSize': DesktopLyricsSettings.fontSize.value,
           'textColor': DesktopLyricsSettings.textColor.value,
           'highlightColor': DesktopLyricsSettings.highlightColor.value,
+          'backgroundOpacity': DesktopLyricsSettings.backgroundOpacity.value,
           'position': DesktopLyricsSettings.position.value,
           'lockedPositionX': DesktopLyricsSettings.lockedPositionX,
           'lockedPositionY': DesktopLyricsSettings.lockedPositionY,
