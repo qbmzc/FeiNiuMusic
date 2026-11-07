@@ -106,6 +106,30 @@ void main() {
     await service.disconnect(silent: true);
   });
 
+  test('后台稳定播放降低轮询频率，断开后停止查询', () async {
+    service.isBackgrounded = true;
+    await service.loadSong(_song('background'));
+    await _waitUntil(() => api.pollCalls == 1);
+    await Future<void>.delayed(const Duration(seconds: 3));
+    expect(api.pollCalls, 1);
+    await _waitUntil(() => api.pollCalls == 2);
+    await service.disconnect(silent: true);
+    await Future<void>.delayed(const Duration(seconds: 6));
+    expect(api.pollCalls, 2);
+  });
+
+  test('后台临近结尾仍快速轮询并自动续播', () async {
+    service.isBackgrounded = true;
+    var completions = 0;
+    service.onCastCompleted = () => completions++;
+    api.onPoll = () async => _info(TransportState.playing, 190);
+    await service.loadSong(_song('ending'));
+    await _waitUntil(() => api.pollCalls >= 2);
+    api.onPoll = () async => _info(TransportState.stopped, 0);
+    await _waitUntil(() => completions == 1);
+    expect(service.isCasting, isTrue);
+  });
+
   test('慢切歌期间停轮询，播放启动时容忍停止帧，确认播放后仍检测停止', () async {
     var disconnects = 0;
     service.onCastDisconnect = () => disconnects++;

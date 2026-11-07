@@ -440,6 +440,7 @@ class PlayerService with WidgetsBindingObserver {
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (_shuttingDown) return;
+    DlnaCastService.instance.isBackgrounded = state != AppLifecycleState.resumed;
     if (state == AppLifecycleState.resumed) {
       _stopBackgroundAudioKeepAlive();
       // 后台期间 Timer 挂起，resume 立即重检定时音量（时间窗可能已跨越）。

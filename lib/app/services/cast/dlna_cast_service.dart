@@ -87,6 +87,7 @@ class DlnaCastService {
   final MediaCastDlnaApi _api;
   final Duration _positionPollInterval;
   final Duration _playbackStartGrace;
+  bool isBackgrounded = false;
 
   /// Android 原生音量键透传通道：投屏时原生层拦截物理音量键，回调
   /// `volumeDelta(+1/-1)`，这里遥控投屏设备音量；Dart 侧通过 `setActive`
@@ -843,9 +844,14 @@ class DlnaCastService {
     bool isCurrent() =>
         revision == _pollRevision && currentDevice.value == device;
     var positionWarningLogged = false;
-    _positionPollTimer = Timer.periodic(_positionPollInterval, (_) async {
-      if (!isCurrent() || _pollInFlight) return;
+    Future<void> poll() async {
+      if (!isCurrent()) return;
+      if (_pollInFlight) {
+        _positionPollTimer = Timer(_positionPollInterval, poll);
+        return;
+      }
       _pollInFlight = true;
+      var pollDelay = _positionPollInterval;
       try {
         final info = await _api
             .getPlaybackInfo(device.udn)
@@ -858,6 +864,12 @@ class DlnaCastService {
         final effectiveDur = info.duration.seconds > 0
             ? info.duration.seconds
             : _castExpectedDurationSec;
+        if (isBackgrounded &&
+            (info.state == TransportState.paused ||
+                (info.state == TransportState.playing &&
+                    effectiveDur - posSec > 15))) {
+          pollDelay = const Duration(seconds: 5);
+        }
 
         castPosition.value = Duration(seconds: posSec);
         switch (info.state) {
@@ -1012,8 +1024,13 @@ class DlnaCastService {
         }
       } finally {
         _pollInFlight = false;
+        if (isCurrent()) {
+          _positionPollTimer = Timer(pollDelay, poll);
+        }
       }
-    });
+    }
+
+    _positionPollTimer = Timer(_positionPollInterval, poll);
   }
 
   /// 渲染器在歌曲中途停止（用户停止/退出电视端）→ 断开投屏。
