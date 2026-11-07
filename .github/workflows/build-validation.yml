@@ -16,7 +16,6 @@ concurrency:
 env:
   FLUTTER_VERSION: c97838627ff5c275e9788839d427ab03eb1dfa01
   PUB_HOSTED_URL: https://pub.flutter-io.cn
-  PREVIEW_BASE_SHA: 0ce23f11b4c72261aa604efc1308e5c188717007
 
 jobs:
   version:
@@ -211,10 +210,12 @@ jobs:
           path: dist
       - name: Publish downstream prerelease
         run: |
-          git log --no-merges --pretty='- %s' "$PREVIEW_BASE_SHA..HEAD" > preview-notes.txt
-          cat >> preview-notes.txt <<EOF_NOTES
+          cat > preview-notes.txt <<EOF_NOTES
+          本次预览版主要更新：
 
-          下游专用预览版，包含尚未全部合入上游的改动。
+          - 桌面歌词：简化外观与窗口锁定交互，鼠标移出后隐藏锁定按钮。
+          - DLNA 投屏：改善息屏续播，降低后台状态查询频率以减少耗电。
+
           Commit: $GITHUB_SHA
           Build: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID
 
