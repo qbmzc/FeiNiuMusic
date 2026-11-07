@@ -19,6 +19,9 @@ class _FakeCastApi extends MediaCastDlnaApi {
   int stopCalls = 0;
 
   @override
+  Future<void> seek(DeviceUdn deviceUdn, TimePosition position) async {}
+
+  @override
   Future<TransportState> getTransportState(DeviceUdn deviceUdn) async =>
       await onTransportPoll?.call() ?? TransportState.playing;
 
@@ -312,5 +315,33 @@ void main() {
     await service.loadSong(_song('first'));
     await _waitUntil(() => polls >= 5, timeout: const Duration(seconds: 7));
     expect(completions, 1);
+  });
+
+  test('接近末尾后进度解析失败仍从播放状态识别完成', () async {
+    var completions = 0;
+    service.onCastCompleted = () => completions++;
+    api.onPoll = () async => _info(TransportState.playing, 190);
+    await service.loadSong(_song('first'));
+    await _waitUntil(() => service.castPosition.value.inSeconds == 190);
+    api.onPoll = () async => throw PlatformException(
+      code: 'dlna_action_failed',
+      details: {'action': 'GetPositionInfo', 'category': 'invalid_response'},
+    );
+    api.onTransportPoll = () async => TransportState.stopped;
+    await _waitUntil(() => completions == 1);
+    expect(service.isCasting, isTrue);
+  });
+
+  test('末尾拖回开头不会被当作自然播完', () async {
+    var completions = 0;
+    service.onCastCompleted = () => completions++;
+    api.onPoll = () async => _info(TransportState.playing, 190);
+    await service.loadSong(_song('first'));
+    await _waitUntil(() => service.castPosition.value.inSeconds == 190);
+    await service.seek(Duration.zero);
+    api.onPoll = () async => _info(TransportState.playing, 0);
+    await _waitUntil(() => service.castPosition.value == Duration.zero);
+    expect(completions, 0);
+    expect(service.isCasting, isTrue);
   });
 }

@@ -10,6 +10,7 @@ import '../feiniu/api_client.dart';
 import '../feiniu/transcode_service.dart';
 import 'dlna_action_failure.dart';
 import 'dlna_capabilities.dart';
+import 'dlna_completion_tracker.dart';
 import 'media_stream_proxy.dart';
 
 /// DLNA 投屏状态。
@@ -160,6 +161,10 @@ class DlnaCastService {
   /// 上一帧轮询的投屏设备位置（秒）。用于播完检测（位置到达时长且不再前进）。
   int _lastPollPositionSeconds = -1;
   bool _castCompletedNotified = false;
+  final _completionTracker = DlnaCompletionTracker();
+  final _completionClock = Stopwatch()..start();
+  bool _completionSuppressed = false;
+  int _seekRevision = 0;
 
   /// 当前投屏歌曲的预期时长（秒）。很多渲染器对 HLS 报 duration 为 0 或占位值，
   /// 用歌曲自身已知时长兜底做播完检测。
@@ -484,6 +489,8 @@ class DlnaCastService {
   }
 
   void _prepareSong(SongEntity song) {
+    _completionTracker.reset();
+    _completionSuppressed = false;
     _castSong = song;
     _transcodeAttempted = false;
     _usingTranscode = false;
@@ -633,6 +640,7 @@ class DlnaCastService {
     try {
       await _setNativeNetworkActive(true);
       await _api.play(device.udn);
+      _completionSuppressed = false;
     } catch (e) {
       if (kDebugMode) debugPrint('[DlnaCastService] play failed: $e');
     }
@@ -642,6 +650,8 @@ class DlnaCastService {
     final device = currentDevice.value;
     if (device == null) return;
     _startupFallbackSuppressed = true;
+    _completionSuppressed = true;
+    _completionTracker.reset();
     try {
       await _api.pause(device.udn);
       await _setNativeNetworkActive(false);
@@ -654,6 +664,8 @@ class DlnaCastService {
     final device = currentDevice.value;
     if (device == null) return;
     _startupFallbackSuppressed = true;
+    _completionSuppressed = true;
+    _completionTracker.reset();
     try {
       await _api.stop(device.udn);
     } catch (e) {
@@ -664,10 +676,24 @@ class DlnaCastService {
   Future<void> seek(Duration position) async {
     final device = currentDevice.value;
     if (device == null) return;
+    final revision = _playbackRevision;
+    final seekRevision = ++_seekRevision;
+    _stopPositionPoll();
+    _completionTracker.reset();
     try {
       await _api.seek(device.udn, TimePosition(seconds: position.inSeconds));
     } catch (e) {
       if (kDebugMode) debugPrint('[DlnaCastService] seek failed: $e');
+    } finally {
+      if (revision == _playbackRevision &&
+          seekRevision == _seekRevision &&
+          currentDevice.value == device) {
+        _lastPollPositionSeconds = -1;
+        _consecutiveStoppedFrames = 0;
+        _castCompletedNotified = false;
+        _completionTracker.seek(position.inSeconds, _completionClock.elapsed);
+        _startPositionPoll();
+      }
     }
   }
 
@@ -864,31 +890,19 @@ class DlnaCastService {
         final prevPos = _lastPollPositionSeconds;
         _lastPollPositionSeconds = posSec;
 
-        // ---- 播完 / 停止检测 ----
-        final reachedEnd = effectiveDur > 0 && posSec >= effectiveDur;
-        final wasNearEnd = effectiveDur > 0 && prevPos >= effectiveDur * 0.9;
-
-        var completed = false;
-        if (reachedEnd) {
-          // 1) 位置连续两帧到达末尾 → 播完
-          if (!_castCompletedNotified && prevPos >= effectiveDur) {
-            completed = true;
-          }
-        } else if (posSec <= 5 &&
-            wasNearEnd &&
-            prevPos > posSec + 30 &&
-            effectiveDur > 0) {
-          // 2) 位置从接近末尾骤降到 0 附近 → 渲染器播完归零
-          completed = true;
-        } else if (info.state == TransportState.stopped ||
-            info.state == TransportState.noMediaPresent) {
-          // 3) 渲染器停止/无媒体：
-          //    - 上次位置接近末尾 → 自然播完 → 续播下一首；
-          //    - 上次位置中途 → 用户停止/退出电视端 → 连续 N 帧确认后断开
-          //      （换源/缓冲等瞬态 stopped 帧不误断）。
-          if (wasNearEnd && prevPos >= 0) {
-            completed = true;
-          } else if (prevPos >= 0) {
+        final completed =
+            !_completionSuppressed &&
+            _completionTracker.observe(
+              state: info.state,
+              now: _completionClock.elapsed,
+              duration: effectiveDur,
+              position: posSec,
+            );
+        if (!completed &&
+            !_castCompletedNotified &&
+            (info.state == TransportState.stopped ||
+                info.state == TransportState.noMediaPresent)) {
+          if (prevPos >= 0) {
             _consecutiveStoppedFrames++;
             if (_consecutiveStoppedFrames >= _stopConfirmFrames) {
               final song = _castSong;
@@ -944,6 +958,20 @@ class DlnaCastService {
                 .timeout(const Duration(seconds: 6));
             if (!isCurrent()) return;
             _castPollFailures = 0;
+            final completed =
+                !_completionSuppressed &&
+                _completionTracker.observe(
+                  state: transport,
+                  now: _completionClock.elapsed,
+                  duration: _castExpectedDurationSec,
+                );
+            if (completed && !_castCompletedNotified) {
+              _castCompletedNotified = true;
+              _log('renderer completed via transport fallback; advancing queue');
+              onCastCompleted?.call();
+              return;
+            }
+            if (_castCompletedNotified) return;
             if (transport == TransportState.playing ||
                 transport == TransportState.paused) {
               _playbackStartDeadline = null;
