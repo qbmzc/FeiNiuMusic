@@ -162,7 +162,9 @@ class DlnaCastService {
   int _lastPollPositionSeconds = -1;
   bool _castCompletedNotified = false;
   final _completionTracker = DlnaCompletionTracker();
-  final _completionClock = Stopwatch()..start();
+  // Include time spent in Android deep sleep, which Stopwatch does not count.
+  Duration get _completionNow =>
+      Duration(milliseconds: DateTime.now().millisecondsSinceEpoch);
   bool _completionSuppressed = false;
   int _seekRevision = 0;
 
@@ -691,7 +693,7 @@ class DlnaCastService {
         _lastPollPositionSeconds = -1;
         _consecutiveStoppedFrames = 0;
         _castCompletedNotified = false;
-        _completionTracker.seek(position.inSeconds, _completionClock.elapsed);
+        _completionTracker.seek(position.inSeconds, _completionNow);
         _startPositionPoll();
       }
     }
@@ -894,7 +896,7 @@ class DlnaCastService {
             !_completionSuppressed &&
             _completionTracker.observe(
               state: info.state,
-              now: _completionClock.elapsed,
+              now: _completionNow,
               duration: effectiveDur,
               position: posSec,
             );
@@ -962,7 +964,7 @@ class DlnaCastService {
                 !_completionSuppressed &&
                 _completionTracker.observe(
                   state: transport,
-                  now: _completionClock.elapsed,
+                  now: _completionNow,
                   duration: _castExpectedDurationSec,
                 );
             if (completed && !_castCompletedNotified) {
