@@ -201,7 +201,7 @@ class _DesktopLyricsSurfaceState extends State<_DesktopLyricsSurface>
     with WindowListener {
   static const _lockInset = 8.0;
   static const _lockSize = 40.0;
-  Offset? _windowPosition;
+  Timer? _savePositionTimer;
   Timer? _pointerTimer;
   bool _checkingPointer = false;
   bool _hovered = false;
@@ -215,8 +215,8 @@ class _DesktopLyricsSurfaceState extends State<_DesktopLyricsSurface>
   @override
   void initState() {
     super.initState();
+    windowManager.addListener(this);
     if (widget.onLockChanged != null) {
-      windowManager.addListener(this);
       _syncPointerTracking();
     }
   }
@@ -296,8 +296,35 @@ class _DesktopLyricsSurfaceState extends State<_DesktopLyricsSurface>
   @override
   void dispose() {
     _pointerTimer?.cancel();
-    if (widget.onLockChanged != null) windowManager.removeListener(this);
+    _savePositionTimer?.cancel();
+    windowManager.removeListener(this);
     super.dispose();
+  }
+
+  @override
+  void onWindowMove() {
+    _savePositionTimer?.cancel();
+    if (_locked) return;
+    // Linux 没有 moved 事件，用防抖保存原生拖动后的最终位置。
+    _savePositionTimer = Timer(const Duration(milliseconds: 200), () {
+      unawaited(_saveDraggedPosition());
+    });
+  }
+
+  @override
+  void onWindowMoved() {
+    _savePositionTimer?.cancel();
+    unawaited(_saveDraggedPosition());
+  }
+
+  Future<void> _startDragging() async {
+    try {
+      await windowManager.startDragging();
+    } catch (error) {
+      if (kDebugMode) {
+        debugPrint('desktop lyrics drag failed: $error');
+      }
+    }
   }
 
   Future<void> _toggleLock() async {
@@ -388,30 +415,7 @@ class _DesktopLyricsSurfaceState extends State<_DesktopLyricsSurface>
     final lyrics = GestureDetector(
       key: const ValueKey('desktop-lyrics-drag-area'),
       behavior: HitTestBehavior.opaque,
-      onPanStart: draggable
-          ? (_) async {
-              _windowPosition = null;
-              try {
-                final position = await windowManager.getPosition();
-                if (mounted) _windowPosition = position;
-              } catch (error) {
-                if (kDebugMode) debugPrint('desktop lyrics drag failed: $error');
-              }
-            }
-          : null,
-      onPanUpdate: draggable
-          ? (details) {
-              final origin = _windowPosition;
-              if (origin == null) return;
-              _windowPosition = origin + details.delta;
-              unawaited(windowManager.setPosition(_windowPosition!));
-            }
-          : null,
-      onPanEnd: draggable
-          ? (_) {
-              unawaited(_saveDraggedPosition());
-            }
-          : null,
+      onPanStart: draggable ? (_) => unawaited(_startDragging()) : null,
       child: content,
     );
     return MouseRegion(
@@ -452,8 +456,10 @@ class _DesktopLyricsSurfaceState extends State<_DesktopLyricsSurface>
   }
 
   Future<void> _saveDraggedPosition() async {
+    if (!mounted || _locked) return;
     try {
       final position = await windowManager.getPosition();
+      if (!mounted || _locked) return;
       await _desktopLyricsChannel.invokeMethod<void>('draggedPosition', {
         'x': position.dx,
         'y': position.dy,
