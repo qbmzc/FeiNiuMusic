@@ -40,9 +40,10 @@ class MediaStreamProxy {
   String _proxyBase = '';
   String _upstreamUrl = '';
   Map<String, String> _upstreamHeaders = const {};
+  _MediaTransferState? _mediaTransfer;
 
   /// 额外资源注册表（封面图等）：token → 上游地址 + 认证头。
-  /// 与主媒体流分离：主媒体流经 `/m/<token>`，资源经 `/r/<resourceToken>`。
+  /// 与主媒体流分离：主媒体流经 `/m/<token>/<mediaId>`，资源经 `/r/<resourceToken>`。
   final Map<String, ({String url, Map<String, String> headers})> _resources =
       {};
 
@@ -55,7 +56,16 @@ class MediaStreamProxy {
   /// 当前代理是否已注册了可用的上游媒体流。
   bool get hasMedia => _upstreamUrl.isNotEmpty;
 
-  /// 根据到渲染器的实际路由确定本机 IPv4，不依赖网卡枚举顺序。
+  bool get hasMediaData => _mediaTransfer?.hasData ?? false;
+
+  bool get hasMediaFailure => _mediaTransfer?.failed ?? false;
+
+  /// 选出渲染器可达的本机 IPv4，作为媒体代理对外通告的 host。
+  ///
+  /// 不能用 `Socket.address` 选址：它的文档语义是「本 socket 用来连接的地址」
+  /// （即远端目标），`dart:io` 没有暴露内核选定的源地址，1.6.9 因此把渲染器
+  /// 自己的 IP 通告成了媒体 host，跨机投送全部拉不到流。这里改为逐个本机地址
+  /// 显式绑定探测，并按与渲染器的地址亲缘度排序。
   static Future<String> resolveLocalAddress(String host, int port) async {
     if (host.isEmpty || port < 1 || port > 65535) {
       throw ArgumentError('Invalid renderer endpoint');
@@ -64,35 +74,87 @@ class MediaStreamProxy {
       type: InternetAddressType.IPv4,
       includeLoopback: true,
     );
-    final candidates = interfaces
-        .expand((interface) => interface.addresses)
-        .where(
-          (address) =>
-              address.address != '0.0.0.0' &&
-              !address.address.startsWith('169.254.'),
-        );
+    final localIps = [
+      for (final interface in interfaces)
+        for (final address in interface.addresses) address.address,
+    ]..removeWhere((ip) => ip == '0.0.0.0' || ip.startsWith('169.254.'));
+    final candidates = orderCandidates(host, localIps);
     SocketException? lastError;
-    for (final address in candidates) {
+    for (final ip in candidates) {
       try {
-        // Socket.address is the remote endpoint. Bind each candidate explicitly
-        // so the selected address is the phone's reachable LAN interface.
+        // 显式绑定候选地址：连上即证明这条路能走到渲染器，且这个地址确实属于本机。
         final socket = await Socket.connect(
           host,
           port,
-          sourceAddress: address,
+          sourceAddress: InternetAddress(ip),
           timeout: const Duration(seconds: 3),
         );
         socket.destroy();
-        _log('route target=$host:$port local=${address.address}');
-        return address.address;
+        _log(
+          'route target=$host:$port local=$ip probed=${candidates.join(' ')}',
+        );
+        return ip;
       } on SocketException catch (error) {
         lastError = error;
       }
+    }
+    if (candidates.isEmpty) {
+      _log('route target=$host:$port has no local candidate of $localIps');
     }
     if (lastError != null) throw lastError;
     throw SocketException(
       'No usable local IPv4 route to renderer: $host:$port',
     );
+  }
+
+  /// 候选本机地址的探测顺序：与渲染器网段最接近的先试，同分保持原枚举顺序。
+  ///
+  /// 连通性探测只证明「本机 → 渲染器」走得通，不证明渲染器能反向拉流：VPN/蜂窝
+  /// 这类地址常常单向可达，先试通就会把渲染器取不到的 host 通告出去（issue #118
+  /// 最初的症状就是通告了覆盖网地址 10.111.15.232）。回环只在渲染器本身就是本机
+  /// 回环时保留，否则远程设备一定拉不到。另外每个探不通的候选都要等 3s connect
+  /// 超时，顺序也直接决定起播耗时。
+  @visibleForTesting
+  static List<String> orderCandidates(
+    String rendererHost,
+    List<String> localIps,
+  ) {
+    final rendererIsLoopback = rendererHost.startsWith('127.');
+    final scored = <({String ip, int score, int index})>[];
+    for (var i = 0; i < localIps.length; i++) {
+      final ip = localIps[i];
+      if (ip.startsWith('127.') && !rendererIsLoopback) continue;
+      scored.add((ip: ip, score: _leadingOctets(ip, rendererHost), index: i));
+    }
+    scored.sort((a, b) {
+      if (a.score != b.score) return b.score - a.score;
+      return a.index - b.index;
+    });
+    return [for (final item in scored) item.ip];
+  }
+
+  /// 两个 IPv4 地址相同的前导字节数（0–4），非 IPv4 记 0。
+  static int _leadingOctets(String a, String b) {
+    final left = _ipv4Octets(a);
+    final right = _ipv4Octets(b);
+    if (left == null || right == null) return 0;
+    var same = 0;
+    while (same < 4 && left[same] == right[same]) {
+      same++;
+    }
+    return same;
+  }
+
+  static List<int>? _ipv4Octets(String ip) {
+    final parts = ip.split('.');
+    if (parts.length != 4) return null;
+    final octets = <int>[];
+    for (final part in parts) {
+      final octet = int.tryParse(part);
+      if (octet == null || octet < 0 || octet > 255) return null;
+      octets.add(octet);
+    }
+    return octets;
   }
 
   /// 使用会话选定的本机地址启动代理；地址变化时释放旧会话。
@@ -146,6 +208,7 @@ class MediaStreamProxy {
     _upstreamUrl = upstreamUrl;
     _upstreamHeaders = Map.unmodifiable(headers);
     _mediaId = _generateToken();
+    _mediaTransfer = _MediaTransferState();
     final safeExtension = _sanitizeExtension(fileExtension);
     _log('registered media extension=$safeExtension');
     return '$base/m/$_token/$_mediaId/media.$safeExtension';
@@ -153,6 +216,7 @@ class MediaStreamProxy {
 
   /// 清空当前注册的媒体流（断开投屏时调用）。代理服务本身保留。
   void unregisterMedia() {
+    _mediaTransfer = null;
     _mediaId = null;
     _upstreamUrl = '';
     _upstreamHeaders = const {};
@@ -182,6 +246,7 @@ class MediaStreamProxy {
     _token = null;
     _mediaId = null;
     _proxyBase = '';
+    _mediaTransfer = null;
     _upstreamUrl = '';
     _upstreamHeaders = const {};
     _resources.clear();
@@ -209,7 +274,7 @@ class MediaStreamProxy {
         await _forward(request, res.url, res.headers);
         return;
       }
-      // 路由：/m/<token>[/...]?u=<目标URL>
+      // 路由：/m/<token>/<mediaId>[/...]?u=<目标URL>
       if (pathSegments.length < 3 ||
           pathSegments[0] != 'm' ||
           pathSegments[1] != _token ||
@@ -223,7 +288,7 @@ class MediaStreamProxy {
         return;
       }
 
-      // 分片/变体播放列表转发：/m/<token>?u=<urlencoded 绝对地址>
+      // 分片/变体播放列表转发：/m/<token>/<mediaId>?u=<urlencoded 绝对地址>
       final queryU = request.uri.queryParameters['u'];
       final target = (queryU != null && queryU.isNotEmpty) ? queryU : upstream;
 
@@ -241,6 +306,7 @@ class MediaStreamProxy {
         _upstreamHeaders,
         logResponse: isPrimaryMediaRequest,
         mediaProxyBase: '$_proxyBase/m/${pathSegments[1]}/${pathSegments[2]}',
+        transfer: _mediaTransfer,
       );
     } catch (e) {
       _log('handle error: ${_safeError(e)}');
@@ -258,6 +324,7 @@ class MediaStreamProxy {
     Map<String, String> headers, {
     bool logResponse = true,
     String? mediaProxyBase,
+    _MediaTransferState? transfer,
   }) async {
     final client = HttpClient();
     try {
@@ -288,6 +355,9 @@ class MediaStreamProxy {
         }
 
         final isM3u8 = _isM3u8(upResp, uri);
+        if (upResp.statusCode < 200 || upResp.statusCode >= 300) {
+          if (transfer != null) transfer.failed = true;
+        }
         final contentType = upResp.headers.value(HttpHeaders.contentTypeHeader);
         final contentLength = upResp.headers.value(
           HttpHeaders.contentLengthHeader,
@@ -300,7 +370,10 @@ class MediaStreamProxy {
             'hls=$isM3u8',
           );
         }
-        if (isM3u8 && request.method != 'HEAD') {
+        if (isM3u8 &&
+            upResp.statusCode >= 200 &&
+            upResp.statusCode < 300 &&
+            request.method != 'HEAD') {
           // HLS：读取 m3u8 文本，改写分片地址后整体返回
           final text = await upResp.transform(utf8.decoder).join();
           final rewritten = _rewriteM3u8(text, uri, mediaProxyBase);
@@ -323,12 +396,26 @@ class MediaStreamProxy {
         if (request.method == 'HEAD') {
           await response.close();
         } else {
-          await response.addStream(upResp);
+          await response.addStream(
+            upResp.map((bytes) {
+              if (transfer != null &&
+                  upResp.statusCode >= 200 &&
+                  upResp.statusCode < 300 &&
+                  bytes.isNotEmpty) {
+                transfer.hasData = true;
+              }
+              return bytes;
+            }),
+          );
           await response.close();
         }
         return;
       }
       _respondInternalError(request);
+      if (transfer != null) transfer.failed = true;
+    } catch (_) {
+      if (transfer != null) transfer.failed = true;
+      rethrow;
     } finally {
       client.close(force: true);
     }
@@ -440,4 +527,9 @@ class MediaStreamProxy {
     }
     return 'mp3';
   }
+}
+
+class _MediaTransferState {
+  bool hasData = false;
+  bool failed = false;
 }

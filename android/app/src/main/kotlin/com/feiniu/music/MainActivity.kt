@@ -69,6 +69,9 @@ class MainActivity : AudioServiceActivity() {
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        if (!flutterEngine.plugins.has(CastNetworkPlugin::class.java)) {
+            flutterEngine.plugins.add(CastNetworkPlugin())
+        }
 
         MethodChannel(
             flutterEngine.dartExecutor.binaryMessenger,

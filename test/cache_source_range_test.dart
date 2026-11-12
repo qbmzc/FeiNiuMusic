@@ -13,7 +13,10 @@ void main() {
       const rangeStart = 3 * 1024 * 1024;
       final body = List<int>.generate(total, (i) => i & 0xff);
 
+      final rangeHeaders = <String>[];
+      final finishInitialDownload = Completer<void>();
       final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      addTearDown(() => server.close(force: true));
       server.listen((request) async {
         try {
           final range = request.headers.value(HttpHeaders.rangeHeader);
@@ -23,10 +26,10 @@ void main() {
             // so the background download does not fail during teardown.
             request.response.headers.contentType = ContentType('audio', 'flac');
             request.response.contentLength = total;
-            request.response.add(body.sublist(0, 1024));
+            request.response.add(body.sublist(0, 64 * 1024));
             await request.response.flush();
-            await Future<void>.delayed(const Duration(milliseconds: 300));
-            for (var offset = 1024; offset < total; offset += 256 * 1024) {
+            await finishInitialDownload.future;
+            for (var offset = 64 * 1024; offset < total; offset += 256 * 1024) {
               final chunkEnd = offset + 256 * 1024 < total
                   ? offset + 256 * 1024
                   : total;
@@ -35,6 +38,7 @@ void main() {
             await request.response.close();
             return;
           }
+          rangeHeaders.add(range);
           final match = RegExp(r'bytes=(\d+)-(\d*)').firstMatch(range)!;
           final start = int.parse(match.group(1)!);
           final end = match.group(2)!.isEmpty
@@ -62,6 +66,9 @@ void main() {
       });
 
       final temp = await Directory.systemTemp.createTemp('cache_source_range');
+      addTearDown(() async {
+        if (await temp.exists()) await temp.delete(recursive: true);
+      });
       final source = StreamAudioCacheSource(
         songId: 'song',
         uri: Uri.parse('http://127.0.0.1:${server.port}/audio'),
@@ -69,24 +76,21 @@ void main() {
         cacheFile: File('${temp.path}/song.flac'),
       );
       unawaited(source.downloadDone.then((_) {}, onError: (_) {}));
+      addTearDown(() async {
+        if (!finishInitialDownload.isCompleted) {
+          finishInitialDownload.complete();
+        }
+        await source.downloadDone.timeout(const Duration(seconds: 3));
+      });
 
       final response = await source.request(rangeStart, null);
-      final received = await response.stream.fold<int>(
-        0,
-        (sum, data) => sum + data.length,
+      final received = await response.stream.fold<List<int>>(
+        <int>[],
+        (bytes, data) => bytes..addAll(data),
       );
 
-      expect(received, total - rangeStart);
-
-      await source.downloadDone.timeout(
-        const Duration(seconds: 3),
-        onTimeout: () {},
-      );
-      await server.close(force: true);
-      await Future<void>.delayed(const Duration(milliseconds: 50));
-      try {
-        await temp.delete(recursive: true);
-      } catch (_) {}
+      expect(rangeHeaders, ['bytes=$rangeStart-${total - 1}']);
+      expect(received, orderedEquals(body.sublist(rangeStart)));
     },
   );
 }

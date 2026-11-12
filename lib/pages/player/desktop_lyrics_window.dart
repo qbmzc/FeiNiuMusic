@@ -5,6 +5,7 @@ import 'package:desktop_multi_window/desktop_multi_window.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:screen_retriever/screen_retriever.dart';
 import 'package:window_manager/window_manager.dart';
 
 import '../../app/state/settings_desktop_lyrics_state.dart';
@@ -55,13 +56,6 @@ Future<void> _showWindow() async {
   await windowManager.show();
 }
 
-/// 只有「自由拖动」模式需要接收鼠标事件。固定和锁定模式均点击穿透，
-/// 避免常驻在最前的歌词条遮住下层输入框或按钮。
-Future<void> _applyClickThrough(String? position) async {
-  final ignore = position != DesktopLyricsSettings.positionFree;
-  await windowManager.setIgnoreMouseEvents(ignore, forward: ignore);
-}
-
 /// 第二个 Flutter 引擎中的桌面歌词窗口。
 Future<void> runDesktopLyricsWindow(WindowController controller) async {
   await windowManager.ensureInitialized();
@@ -83,12 +77,15 @@ Future<void> runDesktopLyricsWindow(WindowController controller) async {
     windowButtonVisibility: false,
   );
   await windowManager.waitUntilReadyToShow(windowOptions, () async {
+    // Windows 隐藏标题栏后仍保留系统边框，需要显式启用无边框模式。
+    if (Platform.isWindows) {
+      await windowManager.setAsFrameless();
+    }
     await windowManager.setHasShadow(false);
     // setAsFrameless() 在 macOS window_manager 0.5.x 会把 isOpaque 设回 true，
     // 导致背景透明度看起来始终不生效。隐藏标题栏已足够无边框，这里显式保留透明窗口。
     await windowManager.setBackgroundColor(Colors.transparent);
-    await _applyClickThrough(DesktopLyricsSettings.positionFixed);
-    await _showWindow();
+    await windowManager.setIgnoreMouseEvents(false);
   });
 
   final state = DesktopLyricsWindowState();
@@ -103,9 +100,6 @@ Future<void> runDesktopLyricsWindow(WindowController controller) async {
         return null;
       case 'show':
         await _showWindow();
-        await _applyClickThrough(
-          lastPosition ?? DesktopLyricsSettings.positionFixed,
-        );
         return null;
       case 'hide':
         await windowManager.hide();
@@ -115,19 +109,17 @@ Future<void> runDesktopLyricsWindow(WindowController controller) async {
         final position = arguments is Map
             ? arguments['mode'] as String?
             : arguments as String?;
-        final locked = position == DesktopLyricsSettings.positionLocked;
-        if (position != lastPosition || locked) {
+        if (lastPosition == null) {
           lastPosition = position;
-          await _applyClickThrough(position);
-          if (locked && arguments is Map) {
+          if (arguments is Map) {
             final x = (arguments['x'] as num?)?.toDouble();
             final y = (arguments['y'] as num?)?.toDouble();
             if (x != null && y != null) {
               await windowManager.setPosition(Offset(x, y));
+              return null;
             }
-          } else if (!locked) {
-            await _applyPosition(position);
           }
+          await windowManager.setAlignment(Alignment.bottomCenter);
         }
         return null;
       default:
@@ -138,13 +130,21 @@ Future<void> runDesktopLyricsWindow(WindowController controller) async {
   // Parent window registers its handler before creating this window. The
   // handshake lets it flush the latest song/style payload after startup.
   unawaited(channel.invokeMethod<void>('ready'));
-  runApp(DesktopLyricsWindow(state: state));
-}
-
-Future<void> _applyPosition(String? value) async {
-  if (value == DesktopLyricsSettings.positionFixed) {
-    await windowManager.setAlignment(Alignment.bottomCenter);
-  }
+  runApp(
+    DesktopLyricsWindow(
+      state: state,
+      onLockChanged: (locked) async {
+        if (locked) {
+          final position = await windowManager.getPosition();
+          await channel.invokeMethod<void>('draggedPosition', {
+            'x': position.dx,
+            'y': position.dy,
+          });
+        }
+        await channel.invokeMethod<void>('setLocked', locked);
+      },
+    ),
+  );
 }
 
 class DesktopLyricsWindowState extends ChangeNotifier {
@@ -160,8 +160,13 @@ class DesktopLyricsWindowState extends ChangeNotifier {
 
 class DesktopLyricsWindow extends StatelessWidget {
   final DesktopLyricsWindowState state;
+  final Future<void> Function(bool)? onLockChanged;
 
-  const DesktopLyricsWindow({super.key, required this.state});
+  const DesktopLyricsWindow({
+    super.key,
+    required this.state,
+    this.onLockChanged,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -172,8 +177,10 @@ class DesktopLyricsWindow extends StatelessWidget {
         style: _baseTextStyle,
         child: ListenableBuilder(
           listenable: state,
-          builder: (context, _) =>
-              _DesktopLyricsSurface(payload: state.payload),
+          builder: (context, _) => _DesktopLyricsSurface(
+            payload: state.payload,
+            onLockChanged: onLockChanged,
+          ),
         ),
       ),
     );
@@ -182,8 +189,9 @@ class DesktopLyricsWindow extends StatelessWidget {
 
 class _DesktopLyricsSurface extends StatefulWidget {
   final Map<String, Object?> payload;
+  final Future<void> Function(bool)? onLockChanged;
 
-  const _DesktopLyricsSurface({required this.payload});
+  const _DesktopLyricsSurface({required this.payload, this.onLockChanged});
 
   @override
   State<_DesktopLyricsSurface> createState() => _DesktopLyricsSurfaceState();
@@ -191,19 +199,103 @@ class _DesktopLyricsSurface extends StatefulWidget {
 
 class _DesktopLyricsSurfaceState extends State<_DesktopLyricsSurface>
     with WindowListener {
+  static const _lockInset = 8.0;
+  static const _lockSize = 40.0;
   Timer? _savePositionTimer;
+  Timer? _pointerTimer;
+  bool _checkingPointer = false;
+  bool _hovered = false;
+  bool _busy = false;
+  bool _hidden = false;
+  bool? _ignoringMouse;
 
-  bool get _draggable =>
-      widget.payload['position'] == DesktopLyricsSettings.positionFree;
+  bool get _locked =>
+      widget.payload['position'] == DesktopLyricsSettings.positionLocked;
 
   @override
   void initState() {
     super.initState();
     windowManager.addListener(this);
+    if (widget.onLockChanged != null) {
+      _syncPointerTracking();
+    }
+  }
+
+  @override
+  void didUpdateWidget(covariant _DesktopLyricsSurface oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.payload['position'] != widget.payload['position']) {
+      _syncPointerTracking();
+    }
+  }
+
+  @override
+  void onWindowHide() {
+    _hidden = true;
+    _pointerTimer?.cancel();
+    _pointerTimer = null;
+  }
+
+  @override
+  void onWindowShow() {
+    if (!_hidden) return;
+    _hidden = false;
+    _syncPointerTracking();
+  }
+
+  void _syncPointerTracking() {
+    if (widget.onLockChanged == null) return;
+    _pointerTimer?.cancel();
+    _pointerTimer = null;
+    if (_locked && !_hidden) {
+      // 穿透后 Flutter 收不到悬停事件，轮询屏幕指针以保留解锁按钮的点击能力。
+      _pointerTimer = Timer.periodic(
+        const Duration(milliseconds: 100),
+        (_) => unawaited(_updatePassthrough()),
+      );
+      unawaited(_updatePassthrough());
+    } else {
+      unawaited(_updatePassthrough());
+    }
+  }
+
+  Future<void> _setIgnoreMouse(bool ignore) async {
+    if (_ignoringMouse == ignore) return;
+    await windowManager.setIgnoreMouseEvents(ignore);
+    _ignoringMouse = ignore;
+  }
+
+  Future<void> _updatePassthrough() async {
+    if (_checkingPointer) return;
+    _checkingPointer = true;
+    try {
+      if (!_locked || _hidden) {
+        await _setIgnoreMouse(false);
+        return;
+      }
+      final cursor = await screenRetriever.getCursorScreenPoint();
+      final bounds = await windowManager.getBounds();
+      if (!mounted || !_locked || _hidden) return;
+      final button = Rect.fromLTWH(
+        bounds.right - _lockInset - _lockSize,
+        bounds.top + _lockInset,
+        _lockSize,
+        _lockSize,
+      );
+      final overButton = button.contains(cursor);
+      if (_hovered != overButton) setState(() => _hovered = overButton);
+      await _setIgnoreMouse(!overButton);
+      if (mounted && !_locked) await _setIgnoreMouse(false);
+    } catch (error) {
+      if (kDebugMode) debugPrint('desktop lyrics pointer check failed: $error');
+    } finally {
+      _checkingPointer = false;
+    }
   }
 
   @override
   void dispose() {
+    _pointerTimer?.cancel();
     _savePositionTimer?.cancel();
     windowManager.removeListener(this);
     super.dispose();
@@ -212,7 +304,7 @@ class _DesktopLyricsSurfaceState extends State<_DesktopLyricsSurface>
   @override
   void onWindowMove() {
     _savePositionTimer?.cancel();
-    if (!_draggable) return;
+    if (_locked) return;
     // Linux 没有 moved 事件，用防抖保存原生拖动后的最终位置。
     _savePositionTimer = Timer(const Duration(milliseconds: 200), () {
       unawaited(_saveDraggedPosition());
@@ -232,6 +324,19 @@ class _DesktopLyricsSurfaceState extends State<_DesktopLyricsSurface>
       if (kDebugMode) {
         debugPrint('desktop lyrics drag failed: $error');
       }
+    }
+  }
+
+  Future<void> _toggleLock() async {
+    final onLockChanged = widget.onLockChanged;
+    if (_busy || onLockChanged == null) return;
+    setState(() => _busy = true);
+    try {
+      await onLockChanged(!_locked);
+    } catch (error) {
+      if (kDebugMode) debugPrint('desktop lyrics lock failed: $error');
+    } finally {
+      if (mounted) setState(() => _busy = false);
     }
   }
 
@@ -255,29 +360,12 @@ class _DesktopLyricsSurfaceState extends State<_DesktopLyricsSurface>
       payload['highlightColor'] as num?,
       const Color(0xFF59F7E7),
     );
-    final opacity = ((payload['backgroundOpacity'] as num?)?.toDouble() ?? 0.64)
-        .clamp(0.0, 0.9);
+    final draggable = !_locked;
 
     final content = Container(
       width: double.infinity,
       height: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-      decoration: BoxDecoration(
-        color: Colors.black.withValues(alpha: opacity),
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(
-          color: Colors.white.withValues(alpha: 0.14 * opacity),
-        ),
-        boxShadow: opacity == 0
-            ? null
-            : [
-                BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.32 * opacity),
-                  blurRadius: 18,
-                  spreadRadius: 1,
-                ),
-              ],
-      ),
+      padding: const EdgeInsets.symmetric(horizontal: 56, vertical: 12),
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
@@ -324,26 +412,60 @@ class _DesktopLyricsSurfaceState extends State<_DesktopLyricsSurface>
         ],
       ),
     );
-    return GestureDetector(
-      behavior: HitTestBehavior.translucent,
-      onPanStart: _draggable ? (_) => unawaited(_startDragging()) : null,
+    final lyrics = GestureDetector(
+      key: const ValueKey('desktop-lyrics-drag-area'),
+      behavior: HitTestBehavior.opaque,
+      onPanStart: draggable ? (_) => unawaited(_startDragging()) : null,
       child: content,
+    );
+    return MouseRegion(
+      onEnter: (_) => setState(() => _hovered = true),
+      onExit: (_) => setState(() => _hovered = false),
+      child: Stack(
+        children: [
+          Positioned.fill(child: lyrics),
+          Positioned(
+            top: _lockInset,
+            right: _lockInset,
+            child: AnimatedOpacity(
+              opacity: _hovered ? 1 : 0,
+              duration: const Duration(milliseconds: 150),
+              child: Material(
+                type: MaterialType.transparency,
+                child: IconButton(
+                  key: const ValueKey('desktop-lyrics-lock'),
+                  tooltip: _locked ? '解锁歌词' : '锁定歌词位置',
+                  onPressed: _busy ? null : _toggleLock,
+                  constraints: const BoxConstraints.tightFor(
+                    width: _lockSize,
+                    height: _lockSize,
+                  ),
+                  iconSize: 20,
+                  icon: Icon(
+                    _locked ? Icons.lock_outline : Icons.lock_open_rounded,
+                    color: Colors.white,
+                    shadows: const [Shadow(color: Colors.black, blurRadius: 5)],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 
   Future<void> _saveDraggedPosition() async {
-    if (!mounted || !_draggable) return;
+    if (!mounted || _locked) return;
     try {
       final position = await windowManager.getPosition();
-      if (!mounted || !_draggable) return;
+      if (!mounted || _locked) return;
       await _desktopLyricsChannel.invokeMethod<void>('draggedPosition', {
         'x': position.dx,
         'y': position.dy,
       });
     } catch (error) {
-      if (kDebugMode) {
-        debugPrint('desktop lyrics save position failed: $error');
-      }
+      if (kDebugMode) debugPrint('desktop lyrics save position failed: $error');
     }
   }
 

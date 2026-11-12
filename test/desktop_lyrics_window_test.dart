@@ -7,7 +7,7 @@ import 'package:feiniu_music/pages/player/desktop_lyrics_window.dart';
 Map<String, Object?> _payload({
   bool karaoke = false,
   String? fontFamily = 'PingFang SC',
-  String position = 'fixed',
+  String position = 'free',
 }) {
   return {
     'currentLine': '当前歌词',
@@ -18,7 +18,6 @@ Map<String, Object?> _payload({
     'fontSize': 24.0,
     'textColor': 0xFFFFFFFF,
     'highlightColor': 0xFF59F7E7,
-    'backgroundOpacity': 0.64,
     'position': position,
   };
 }
@@ -30,9 +29,8 @@ List<TextStyle> _resolvedStylesOf(WidgetTester tester, String text) {
   expect(finder, findsWidgets, reason: '未找到歌词文本 $text');
   final styles = <TextStyle>[];
   for (var index = 0; index < finder.evaluate().length; index++) {
-    final inherited = DefaultTextStyle.of(
-      tester.element(finder.at(index)),
-    ).style;
+    final inherited = DefaultTextStyle.of(tester.element(finder.at(index)))
+        .style;
     final own = tester.widget<Text>(finder.at(index)).style;
     styles.add(own == null ? inherited : inherited.merge(own));
   }
@@ -40,6 +38,31 @@ List<TextStyle> _resolvedStylesOf(WidgetTester tester, String text) {
 }
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+
+  testWidgets('直接点击歌词窗口的小锁即可请求锁定', (tester) async {
+    const channel = MethodChannel('window_manager');
+    final messenger = tester.binding.defaultBinaryMessenger;
+    messenger.setMockMethodCallHandler(channel, (_) async => true);
+    addTearDown(() => messenger.setMockMethodCallHandler(channel, null));
+    final state = DesktopLyricsWindowState()..update(_payload());
+    bool? requestedLock;
+
+    await tester.pumpWidget(
+      DesktopLyricsWindow(
+        state: state,
+        onLockChanged: (locked) async {
+          requestedLock = locked;
+        },
+      ),
+    );
+    await tester.tap(find.byKey(const ValueKey('desktop-lyrics-lock')));
+    await tester.pump();
+
+    expect(requestedLock, isTrue);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
   testWidgets('歌词不继承 MaterialApp 兜底样式的下划线', (tester) async {
     final state = DesktopLyricsWindowState()..update(_payload());
 
@@ -101,17 +124,34 @@ void main() {
     expect(highlight.width, closeTo(base.width, 0.5));
   });
 
-  testWidgets('固定位置不接收拖动手势', (tester) async {
-    final state = DesktopLyricsWindowState()..update(_payload());
+  testWidgets('忽略旧透明度配置，歌词始终没有背景或边框', (tester) async {
+    final state = DesktopLyricsWindowState()
+      ..update({..._payload(), 'backgroundOpacity': 0.9});
 
     await tester.pumpWidget(DesktopLyricsWindow(state: state));
 
     final gesture = tester.widget<GestureDetector>(
-      find.byType(GestureDetector),
+      find.byKey(const ValueKey('desktop-lyrics-drag-area')),
+    );
+    final container = gesture.child! as Container;
+    expect(container.color, isNull);
+    expect(container.decoration, isNull);
+    expect(find.byTooltip('锁定歌词位置'), findsOneWidget);
+  });
+
+  testWidgets('锁定后不接收拖动手势且可以找到解锁按钮', (tester) async {
+    final state = DesktopLyricsWindowState()
+      ..update(_payload(position: 'locked'));
+
+    await tester.pumpWidget(DesktopLyricsWindow(state: state));
+
+    final gesture = tester.widget<GestureDetector>(
+      find.byKey(const ValueKey('desktop-lyrics-drag-area')),
     );
     expect(gesture.onPanStart, isNull);
     expect(gesture.onPanUpdate, isNull);
     expect(gesture.onPanEnd, isNull);
+    expect(find.byTooltip('解锁歌词'), findsOneWidget);
   });
 
   testWidgets('只有自由拖动模式接收拖动手势', (tester) async {
@@ -121,13 +161,12 @@ void main() {
     await tester.pumpWidget(DesktopLyricsWindow(state: state));
 
     final gesture = tester.widget<GestureDetector>(
-      find.byType(GestureDetector),
+      find.byKey(const ValueKey('desktop-lyrics-drag-area')),
     );
     expect(gesture.onPanStart, isNotNull);
     expect(gesture.onPanUpdate, isNull);
     expect(gesture.onPanEnd, isNull);
   });
-
   testWidgets('自由拖动只启动一次原生拖动，不逐帧设置位置', (tester) async {
     const channel = MethodChannel('window_manager');
     final calls = <String>[];
@@ -158,7 +197,7 @@ void main() {
 
     expect(calls, ['startDragging']);
 
-    for (final position in ['fixed', 'locked']) {
+    for (final position in ['locked']) {
       calls.clear();
       state.update(_payload(position: position));
       await tester.pump();

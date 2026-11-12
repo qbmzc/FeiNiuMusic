@@ -24,7 +24,7 @@ class HomeShortcutItem {
 /// 首页快捷菜单 — 歌曲 / 歌手 / 专辑 / 风格。
 ///
 /// 默认 4×1 一行排列（手机端）；`grid2x2` 时改为 2×2 四宫格（大屏顶部右侧），
-/// 每个条目是图标槽 + 文字标签，点击跳对应库页面。
+/// 每个条目是圆形图标 + 文字标签，点击跳对应库页面。
 class HomeShortcutMenu extends StatelessWidget {
   final List<HomeShortcutItem> items;
 
@@ -101,44 +101,52 @@ class _ShortcutItem extends StatelessWidget {
     return HomePanel(
       color: embedded ? Colors.transparent : null,
       borderRadius: BorderRadius.circular(18),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(16),
-        onTap: item.onTap,
-        child: Padding(
-          padding: EdgeInsets.symmetric(vertical: 12 * scale),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              // 渐变图标槽
-              Container(
-                width: iconSize,
-                height: iconSize,
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                    colors: [
-                      accent.withValues(alpha: .18),
-                      scheme.surfaceContainerHigh.withValues(alpha: .5),
-                    ],
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(
+            color: scheme.outlineVariant.withValues(alpha: .22),
+          ),
+        ),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(16),
+          onTap: item.onTap,
+          child: Padding(
+            padding: EdgeInsets.symmetric(vertical: 12 * scale),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // 圆形图标容器
+                Container(
+                  width: iconSize,
+                  height: iconSize,
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                      colors: [
+                        accent.withValues(alpha: .18),
+                        scheme.surfaceContainerHigh.withValues(alpha: .5),
+                      ],
+                    ),
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(color: accent.withValues(alpha: .18)),
                   ),
-                  borderRadius: BorderRadius.circular(14),
-                  border: Border.all(color: accent.withValues(alpha: .18)),
+                  child: Icon(item.icon, size: iconSize * 0.5, color: accent),
                 ),
-                child: Icon(item.icon, size: iconSize * 0.5, color: accent),
-              ),
-              SizedBox(height: 6 * scale),
-              Text(
-                item.label,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  fontSize: 12 * scale,
-                  fontWeight: FontWeight.w600,
-                  color: scheme.onSurfaceVariant,
+                SizedBox(height: 6 * scale),
+                Text(
+                  item.label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 12 * scale,
+                    fontWeight: FontWeight.w600,
+                    color: scheme.onSurfaceVariant,
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),
