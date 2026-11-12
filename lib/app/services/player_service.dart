@@ -981,14 +981,6 @@ class PlayerService with WidgetsBindingObserver {
           return (kind: EngineKind.justAudio, transcode: true);
         }
         final kind = await routeForSong(s);
-        // 只打印走 media_kit 的异常路由（正常 just_audio 不刷屏），用于
-        // 确诊「为什么普通歌进了 media_kit」。
-        if (kDebugMode && kind == EngineKind.mediaKit) {
-          final fmt = FeiNiuTranscodeService.instance.resolvedFormatForSync(s);
-          // debugPrint(
-          //   '[PlayerService] engineKind ${s.title} fmt=$fmt -> mediaKit',
-          // );
-        }
         return (kind: kind, transcode: false);
       }),
     );

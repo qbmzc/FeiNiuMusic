@@ -582,7 +582,6 @@ class _SleepTimerActionTile extends StatelessWidget {
     return ValueListenableBuilder<String?>(
       valueListenable: player.sleepTimerDisplayText,
       builder: (context, remaining, _) {
-        final isActive = remaining != null && remaining.isNotEmpty;
         return AppListTile(
           leading: const Icon(Icons.bedtime_outlined),
           title: '定时关闭',

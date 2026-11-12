@@ -229,15 +229,25 @@ class _DesktopLyricsSurfaceState extends State<_DesktopLyricsSurface>
     }
   }
 
+  // window_manager 的 WindowListener 没有 onWindowHide/onWindowShow，
+  // 原生端（Windows/Linux）通过 onWindowEvent('hide'/'show') 通知。
   @override
-  void onWindowHide() {
+  void onWindowEvent(String eventName) {
+    switch (eventName) {
+      case 'hide':
+        _onWindowHidden();
+      case 'show':
+        _onWindowShown();
+    }
+  }
+
+  void _onWindowHidden() {
     _hidden = true;
     _pointerTimer?.cancel();
     _pointerTimer = null;
   }
 
-  @override
-  void onWindowShow() {
+  void _onWindowShown() {
     if (!_hidden) return;
     _hidden = false;
     _syncPointerTracking();

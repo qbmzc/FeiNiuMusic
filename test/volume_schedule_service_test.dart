@@ -62,19 +62,6 @@ void main() {
     AppPlaybackVolumeSettings.volume.value = manualVolume ?? 1;
   }
 
-  VolumeSchedulePeriod period({
-    required int startMin,
-    required int endMin,
-    required double volume,
-  }) {
-    return VolumeSchedulePeriod(
-      id: 'test-p',
-      startMin: startMin,
-      endMin: endMin,
-      volume: volume,
-    );
-  }
-
   group('VolumeScheduleService 生效时段内', () {
     test('手动调节音量不再被心跳强制覆盖', () async {
       await loadWith(

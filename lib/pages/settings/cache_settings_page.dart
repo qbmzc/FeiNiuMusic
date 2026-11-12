@@ -82,7 +82,7 @@ class _CacheSettingsPageState extends State<CacheSettingsPage>
   Future<int> _getLyricsCacheSize() async {
     try {
       final dir = await getApplicationSupportDirectory();
-      return _dirSize(Directory(p.join(dir.path, 'lyrics')));
+      return await _dirSize(Directory(p.join(dir.path, 'lyrics')));
     } catch (_) {
       return 0;
     }

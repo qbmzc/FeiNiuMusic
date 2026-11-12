@@ -78,7 +78,7 @@ class CoverLocalCache {
       final cacheObject = await _coverCache.getFileFromCache(url);
       if (cacheObject != null) {
         final f = io.File(cacheObject.file.path);
-        if (await f.exists()) return _copyToCoverCache(f, target);
+        if (await f.exists()) return await _copyToCoverCache(f, target);
       }
     } catch (error) {
       _debugLog('read cached cover failed: $error');
@@ -89,7 +89,7 @@ class CoverLocalCache {
         headers: FeiNiuApiClient.imageAuthHeaders(),
       );
       final f = io.File(cacheFile.path);
-      if (await f.exists()) return _copyToCoverCache(f, target);
+      if (await f.exists()) return await _copyToCoverCache(f, target);
     } catch (error) {
       _debugLog('download cover with cache manager failed: $error');
     }
