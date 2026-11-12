@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:feiniu_music/pages/player/desktop_lyrics_window.dart';
@@ -123,7 +124,97 @@ void main() {
       find.byType(GestureDetector),
     );
     expect(gesture.onPanStart, isNotNull);
-    expect(gesture.onPanUpdate, isNotNull);
-    expect(gesture.onPanEnd, isNotNull);
+    expect(gesture.onPanUpdate, isNull);
+    expect(gesture.onPanEnd, isNull);
+  });
+
+  testWidgets('自由拖动只启动一次原生拖动，不逐帧设置位置', (tester) async {
+    const channel = MethodChannel('window_manager');
+    final calls = <String>[];
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(channel, (
+      call,
+    ) async {
+      calls.add(call.method);
+      return null;
+    });
+    addTearDown(() {
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        channel,
+        null,
+      );
+    });
+    final state = DesktopLyricsWindowState()
+      ..update(_payload(position: 'free'));
+    await tester.pumpWidget(DesktopLyricsWindow(state: state));
+
+    // 从歌词文字外的空白区域拖动，也应触发原生窗口移动。
+    final pointer = await tester.startGesture(const Offset(10, 10));
+    await pointer.moveBy(const Offset(40, 0));
+    await tester.pump();
+    await pointer.moveBy(const Offset(30, 20));
+    await tester.pump();
+    await pointer.up();
+    await tester.pump();
+
+    expect(calls, ['startDragging']);
+
+    for (final position in ['fixed', 'locked']) {
+      calls.clear();
+      state.update(_payload(position: position));
+      await tester.pump();
+      await tester.dragFrom(const Offset(10, 10), const Offset(80, 20));
+      expect(calls, isEmpty);
+    }
+  });
+
+  testWidgets('原生移动事件防抖保存位置，销毁后取消保存', (tester) async {
+    const windowChannel = MethodChannel('window_manager');
+    const lyricsChannel = MethodChannel(
+      'mixin.one/desktop_multi_window/channels',
+    );
+    final saved = <MethodCall>[];
+    final messenger = tester.binding.defaultBinaryMessenger;
+    messenger.setMockMethodCallHandler(windowChannel, (call) async {
+      expectSync(call.method, 'getBounds');
+      return {'x': 120.0, 'y': 240.0, 'width': 760.0, 'height': 112.0};
+    });
+    messenger.setMockMethodCallHandler(lyricsChannel, (call) async {
+      saved.add(call);
+      return null;
+    });
+    addTearDown(() {
+      messenger.setMockMethodCallHandler(windowChannel, null);
+      messenger.setMockMethodCallHandler(lyricsChannel, null);
+    });
+    Future<void> moveEvent() async {
+      await messenger.handlePlatformMessage(
+        windowChannel.name,
+        const StandardMethodCodec().encodeMethodCall(
+          const MethodCall('onEvent', {'eventName': 'move'}),
+        ),
+        (_) {},
+      );
+    }
+
+    final state = DesktopLyricsWindowState()
+      ..update(_payload(position: 'free'));
+    await tester.pumpWidget(DesktopLyricsWindow(state: state));
+    await moveEvent();
+    await tester.pump(const Duration(milliseconds: 150));
+    await moveEvent();
+    await tester.pump(const Duration(milliseconds: 150));
+    expect(saved, isEmpty);
+    await tester.pump(const Duration(milliseconds: 50));
+    expect(saved, hasLength(1));
+    expect(saved.single.arguments, {
+      'channel': 'com.feiniu.music/desktop_lyrics_window',
+      'method': 'draggedPosition',
+      'arguments': {'x': 120.0, 'y': 240.0},
+    });
+
+    await moveEvent();
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump(const Duration(milliseconds: 200));
+    expect(saved, hasLength(1));
   });
 }

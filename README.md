@@ -158,6 +158,10 @@ flutter test             # 单元测试 + Widget 测试
 flutter analyze          # 静态分析
 ```
 
+GitHub Actions 的 `ci` 工作流会在分支推送、Pull Request 和手动触发时，
+分别运行静态分析与全部单元 / Widget 测试。Flutter SDK 与发布构建锁定到同一
+commit，依赖按 `pubspec.lock` 安装；检查结果可在 PR 检查区或 Actions 页面查看。
+
 ### 构建发布版 APK
 
 ```bash

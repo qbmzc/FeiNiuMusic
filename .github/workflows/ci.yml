@@ -2,8 +2,8 @@ name: ci
 
 on:
   push:
-    branches-ignore:
-      - preview
+    branches:
+      - '**'
   pull_request:
   workflow_dispatch:
   workflow_call:
@@ -45,7 +45,7 @@ jobs:
         run: flutter pub get --enforce-lockfile
       - name: Analyze
         if: matrix.check == 'analyze'
-        run: flutter analyze --no-pub --no-fatal-infos --no-fatal-warnings
+        run: flutter analyze --no-pub
       - name: Test
         if: matrix.check == 'test'
         run: flutter test --no-pub --reporter expanded

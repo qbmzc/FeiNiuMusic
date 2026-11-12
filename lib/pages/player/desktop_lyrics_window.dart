@@ -189,8 +189,51 @@ class _DesktopLyricsSurface extends StatefulWidget {
   State<_DesktopLyricsSurface> createState() => _DesktopLyricsSurfaceState();
 }
 
-class _DesktopLyricsSurfaceState extends State<_DesktopLyricsSurface> {
-  Offset? _windowPosition;
+class _DesktopLyricsSurfaceState extends State<_DesktopLyricsSurface>
+    with WindowListener {
+  Timer? _savePositionTimer;
+
+  bool get _draggable =>
+      widget.payload['position'] == DesktopLyricsSettings.positionFree;
+
+  @override
+  void initState() {
+    super.initState();
+    windowManager.addListener(this);
+  }
+
+  @override
+  void dispose() {
+    _savePositionTimer?.cancel();
+    windowManager.removeListener(this);
+    super.dispose();
+  }
+
+  @override
+  void onWindowMove() {
+    _savePositionTimer?.cancel();
+    if (!_draggable) return;
+    // Linux 没有 moved 事件，用防抖保存原生拖动后的最终位置。
+    _savePositionTimer = Timer(const Duration(milliseconds: 200), () {
+      unawaited(_saveDraggedPosition());
+    });
+  }
+
+  @override
+  void onWindowMoved() {
+    _savePositionTimer?.cancel();
+    unawaited(_saveDraggedPosition());
+  }
+
+  Future<void> _startDragging() async {
+    try {
+      await windowManager.startDragging();
+    } catch (error) {
+      if (kDebugMode) {
+        debugPrint('desktop lyrics drag failed: $error');
+      }
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -214,7 +257,6 @@ class _DesktopLyricsSurfaceState extends State<_DesktopLyricsSurface> {
     );
     final opacity = ((payload['backgroundOpacity'] as num?)?.toDouble() ?? 0.64)
         .clamp(0.0, 0.9);
-    final draggable = payload['position'] == DesktopLyricsSettings.positionFree;
 
     final content = Container(
       width: double.infinity,
@@ -283,34 +325,26 @@ class _DesktopLyricsSurfaceState extends State<_DesktopLyricsSurface> {
       ),
     );
     return GestureDetector(
-      onPanStart: draggable
-          ? (_) async {
-              _windowPosition = await windowManager.getPosition();
-            }
-          : null,
-      onPanUpdate: draggable
-          ? (details) {
-              final origin = _windowPosition;
-              if (origin == null) return;
-              _windowPosition = origin + details.delta;
-              unawaited(windowManager.setPosition(_windowPosition!));
-            }
-          : null,
-      onPanEnd: draggable
-          ? (_) {
-              unawaited(_saveDraggedPosition());
-            }
-          : null,
+      behavior: HitTestBehavior.translucent,
+      onPanStart: _draggable ? (_) => unawaited(_startDragging()) : null,
       child: content,
     );
   }
 
   Future<void> _saveDraggedPosition() async {
-    final position = await windowManager.getPosition();
-    await _desktopLyricsChannel.invokeMethod<void>('draggedPosition', {
-      'x': position.dx,
-      'y': position.dy,
-    });
+    if (!mounted || !_draggable) return;
+    try {
+      final position = await windowManager.getPosition();
+      if (!mounted || !_draggable) return;
+      await _desktopLyricsChannel.invokeMethod<void>('draggedPosition', {
+        'x': position.dx,
+        'y': position.dy,
+      });
+    } catch (error) {
+      if (kDebugMode) {
+        debugPrint('desktop lyrics save position failed: $error');
+      }
+    }
   }
 
   Color _color(num? value, Color fallback) {
