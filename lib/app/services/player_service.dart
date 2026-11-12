@@ -459,7 +459,9 @@ class PlayerService with WidgetsBindingObserver {
       _persistPlaybackStateNow();
       _statsService.flush();
       _recorder.onLifecyclePause();
-      if (isPlaying.value) {
+      // 投屏时 isPlaying 代表渲染器状态；本机引擎已暂停，不需要用音频会话
+      // 保活，否则 Android 会反复 setActive(true)，可能触发音频焦点中断。
+      if (isPlaying.value && !isCasting.value) {
         _startBackgroundAudioKeepAlive();
       }
       return;
@@ -550,7 +552,7 @@ class PlayerService with WidgetsBindingObserver {
     cast.onCastCompleted = () {
       // 投屏设备播完当前歌曲：推进逻辑队列（含随机/漫游自动填充），
       // 把下一首推送到投屏设备。
-      unawaited(_advanceCastToNext());
+      unawaited(_advanceCastToNext(auto: true));
     };
     cast.onCastDisconnect = () {
       _debugLog('cast disconnect -> resume local playback');
@@ -2284,32 +2286,47 @@ class PlayerService with WidgetsBindingObserver {
 
   /// 投屏设备播完当前歌曲后的续播：推进逻辑队列（随机/漫游模式自动填充），
   /// 把下一首推送到投屏设备。
-  Future<void> _advanceCastToNext() async {
-    // 随机/漫游模式：队尾无下一首时先追加，保证队列不枯竭。
-    final list = queue.value;
-    final idx = currentIndex.value;
-    if (list.isEmpty || idx < 0) return;
-    if (playbackMode.value == PlaybackMode.shuffle && idx >= list.length - 1) {
-      // 漫游链：roam-next 追加；本地随机（playShuffle）：queueExtender 追加。
-      if (roamActive) {
-        await _extendRoamQueue();
-      } else {
-        await _autoExtendQueue();
+  ///
+  /// [auto] 为 true 表示渲染器自然播完（单曲循环重播当前曲）；手动「下一首」
+  /// 始终前进。
+  Future<void> _advanceCastToNext({bool auto = false}) async {
+    try {
+      final list = queue.value;
+      final idx = currentIndex.value;
+      if (list.isEmpty || idx < 0) return;
+      if (auto && playbackMode.value == PlaybackMode.single) {
+        final song = currentSong.value;
+        if (song != null) {
+          _debugLog('cast completed -> repeat single ${song.title}');
+          await DlnaCastService.instance.loadSong(song);
+        }
+        return;
       }
-    }
-    var targetIdx = currentIndex.value + 1;
-    if (targetIdx >= queue.value.length) {
-      if (playbackMode.value == PlaybackMode.loop) {
+      // 随机/漫游模式：队尾无下一首时先追加，保证队列不枯竭
+      // （追加在途时复用同一个 Future，不会重复请求）。
+      if (playbackMode.value == PlaybackMode.shuffle &&
+          idx >= list.length - 1) {
+        if (roamActive) {
+          await _extendRoamQueue();
+        } else {
+          await _autoExtendQueue();
+        }
+      }
+      var targetIdx = currentIndex.value + 1;
+      if (targetIdx >= queue.value.length) {
+        if (playbackMode.value == PlaybackMode.single) return;
+        // loop 回卷；随机模式追加失败时同样回卷，避免投屏直接停播。
         targetIdx = 0;
-      } else {
-        return; // 无可播下一首
       }
-    }
-    _activateSong(targetIdx);
-    _emitSnapshot(force: true);
-    final song = currentSong.value;
-    if (song != null) {
-      await DlnaCastService.instance.loadSong(song);
+      _activateSong(targetIdx);
+      _emitSnapshot(force: true);
+      final song = currentSong.value;
+      _debugLog('cast advance -> index=$targetIdx song=${song?.title}');
+      if (song != null) {
+        await DlnaCastService.instance.loadSong(song);
+      }
+    } catch (e) {
+      _debugLog('cast advance failed: $e');
     }
   }
 
@@ -3422,6 +3439,7 @@ class PlayerService with WidgetsBindingObserver {
   }
 
   void _startBackgroundAudioKeepAliveIfNeeded() {
+    if (isCasting.value) return;
     final lifecycle = WidgetsBinding.instance.lifecycleState;
     if (lifecycle == AppLifecycleState.paused ||
         lifecycle == AppLifecycleState.hidden) {
@@ -3434,7 +3452,9 @@ class PlayerService with WidgetsBindingObserver {
     _backgroundAudioKeepAliveTimer = Timer.periodic(
       const Duration(seconds: 25),
       (_) {
-        if (!isPlaying.value) {
+        // 生命周期切换后可能已经开始投屏；停止本机音频会话保活，避免
+        // 将渲染器的播放状态误认为本机仍在播放。
+        if (!isPlaying.value || isCasting.value) {
           _stopBackgroundAudioKeepAlive();
           return;
         }

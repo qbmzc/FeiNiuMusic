@@ -14,6 +14,14 @@ It documents the build/lint/test workflow and the code conventions used in this 
 
 ## 2) Setup Commands
 
+### Local SDK Policy
+
+- Use `/opt/flutter` as the local Flutter SDK for this repository.
+- Run Flutter commands with `/opt/flutter/bin/flutter` and Dart commands with `/opt/flutter/bin/dart`. The shorter `flutter` and `dart` commands below refer to these executables.
+- Do not use temporary SDKs under `/tmp`, including `/tmp/feiniumusic-flutter-sdk`.
+- Keep generated SDK paths, including `.dart_tool/package_config.json` and `android/local.properties`, consistent with `/opt/flutter`.
+- Do not upgrade, replace, or switch the SDK channel unless the user explicitly requests it.
+
 Run from repository root.
 
 ```bash

@@ -20,7 +20,7 @@ void main() {
   test('waitForLogin 在正确 token 提交后返回凭据', () async {
     final session = await LoginPairServer.start();
     final url = session.urls.first;
-    final client = HttpClient();
+    final client = HttpClient()..findProxy = (_) => 'DIRECT';
     addTearDown(client.close);
     final future = LoginPairServer.waitForLogin();
     final req = await client.postUrl(Uri.parse('$url/submit'));
@@ -39,7 +39,7 @@ void main() {
 
   test('错误 token → 404', () async {
     final session = await LoginPairServer.start();
-    final client = HttpClient();
+    final client = HttpClient()..findProxy = (_) => 'DIRECT';
     addTearDown(client.close);
     // 用真实服务器端口但换掉 token 路径 → 404
     final uri = Uri.parse(session.urls.first);
@@ -58,7 +58,7 @@ void main() {
   test('waitForLogin 一次消费后失效', () async {
     final session = await LoginPairServer.start();
     final url = session.urls.first;
-    final client = HttpClient();
+    final client = HttpClient()..findProxy = (_) => 'DIRECT';
     addTearDown(client.close);
     final future = LoginPairServer.waitForLogin();
     final req = await client.postUrl(Uri.parse('$url/submit'));

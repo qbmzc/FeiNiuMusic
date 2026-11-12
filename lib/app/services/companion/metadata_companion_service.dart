@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart';
 
 import '../feiniu/api_client.dart';
 import 'companion_error.dart';
@@ -12,14 +13,14 @@ enum EntityEditKind {
 
   /// 服务端增强 /cover、/entity 接口使用的 type 字段值。
   String get apiName => switch (this) {
-        EntityEditKind.artist => 'artist',
-        EntityEditKind.album => 'album',
-      };
+    EntityEditKind.artist => 'artist',
+    EntityEditKind.album => 'album',
+  };
 
   String get label => switch (this) {
-        EntityEditKind.artist => '歌手',
-        EntityEditKind.album => '专辑',
-      };
+    EntityEditKind.artist => '歌手',
+    EntityEditKind.album => '专辑',
+  };
 }
 
 /// FnMusicEnhance 服务端增强元数据服务。
@@ -112,11 +113,7 @@ class MetadataCompanionService {
   }) async {
     final response = await _post(
       _entityPath,
-      data: {
-        'type': kind.apiName,
-        'name': name,
-        'action': 'create',
-      },
+      data: {'type': kind.apiName, 'name': name, 'action': 'create'},
     );
     final data = response.data;
     if (data == null || data['code'] != 0) {
@@ -136,18 +133,37 @@ class MetadataCompanionService {
   }) async {
     final base = baseUrl;
     if (base == null) throw StateError('未配置服务器地址');
+    final timer = Stopwatch()..start();
+    if (kDebugMode) {
+      debugPrint(
+        '[MetadataCompanion] POST $path type=${data['type']} '
+        'guid=${data['guid']} action=${data['action']}',
+      );
+    }
     try {
-      return await _dio.post<Map<String, dynamic>>(
+      final response = await _dio.post<Map<String, dynamic>>(
         '$base$path',
         data: data,
         options: Options(
-          headers: {
-            ..._authHeaders(),
-            'Content-Type': 'application/json',
-          },
+          headers: {..._authHeaders(), 'Content-Type': 'application/json'},
         ),
       );
+      if (kDebugMode) {
+        debugPrint(
+          '[MetadataCompanion] response path=$path '
+          'http=${response.statusCode} code=${response.data?['code']} '
+          'msg=${response.data?['msg']} elapsedMs=${timer.elapsedMilliseconds}',
+        );
+      }
+      return response;
     } on DioException catch (e) {
+      if (kDebugMode) {
+        debugPrint(
+          '[MetadataCompanion] failed path=$path guid=${data['guid']} '
+          'http=${e.response?.statusCode} type=${e.type} '
+          'elapsedMs=${timer.elapsedMilliseconds}',
+        );
+      }
       throw Exception(companionErrorText(e));
     }
   }
