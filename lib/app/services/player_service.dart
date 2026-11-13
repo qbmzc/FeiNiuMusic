@@ -100,6 +100,15 @@ class PlayerService with WidgetsBindingObserver {
   /// 构建播放源时记录每首歌最终命中的转码格式，激活对应逻辑索引后再发布。
   final Map<String, String> _resolvedPlaybackCodecs = {};
 
+  /// 构建播放源时解析为在线转码 HLS 的歌曲。同一 run 内的歌曲会并发解析，
+  /// 不能用「最后一次解析的 HLS 地址」判断当前歌是否在线转码。
+  final Set<String> _transcodeHlsSongIds = {};
+
+  bool get _isCurrentTranscodeHls {
+    final id = currentSong.value?.id;
+    return id != null && _transcodeHlsSongIds.contains(id);
+  }
+
   /// 当前引擎 run 在逻辑队列中的起始索引。引擎 currentIndexStream 给的是
   /// 引擎内（run 内）索引，映射回逻辑索引需加该偏移。
   int _activeRunStart = 0;
@@ -647,7 +656,7 @@ class PlayerService with WidgetsBindingObserver {
       // 在线转码 HLS 是边转码边播放的（无 ENDLIST 的直播式列表），引擎上报的
       // 是「已转码部分」的时长，会随转码进度增长：同样用曲目时长，且不持久化
       // 这个不完整的时长。
-      final transcodingHls = _activeTranscodeHlsUrl != null;
+      final transcodingHls = _isCurrentTranscodeHls;
       final useSongDuration =
           song != null &&
           (song.isCue || transcodingHls) &&
@@ -697,7 +706,7 @@ class PlayerService with WidgetsBindingObserver {
         stalled:
             state.playing &&
             state.processingState == EngineProcessingState.buffering &&
-            playbackTranscodeCodec.value != null,
+            _isCurrentTranscodeHls,
         trackId: currentSong.value?.id,
       );
       // 无损大文件（media_kit 直连原始流）对网络要求高：缓冲超时提示网络缓慢。
@@ -4122,6 +4131,7 @@ class PlayerService with WidgetsBindingObserver {
     bool forceRefresh = false,
   }) async {
     _resolvedPlaybackCodecs.remove(song.id);
+    _transcodeHlsSongIds.remove(song.id);
     final api = FeiNiuApiClient.instance;
     if (api.baseUrl.isNotEmpty) {
       // 播放出错重试时删除损坏/过期的缓存，强制走远端
@@ -4260,6 +4270,7 @@ class PlayerService with WidgetsBindingObserver {
     // 记录转码 HLS 地址：播完该歌时后台拼接下载成完整文件（第二次起零流量）。
     // 不在构建源时立即下载，避免首次播放双倍带宽。
     _activeTranscodeHlsUrl = hlsUrl;
+    _transcodeHlsSongIds.add(song.id);
     _activeTranscodeCodec = codec;
     _resolvedPlaybackCodecs[song.id] = codec;
     if (currentSong.value?.id == song.id) {
