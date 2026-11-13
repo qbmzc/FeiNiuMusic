@@ -111,6 +111,7 @@ secrets.*
 .env
 .env.*
 *.env
+/\.worktrees/
 
 # 源码打包压缩包
 *.7z

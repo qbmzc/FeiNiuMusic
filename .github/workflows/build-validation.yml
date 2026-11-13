@@ -213,8 +213,8 @@ jobs:
           cat > preview-notes.txt <<EOF_NOTES
           本次预览版主要更新：
 
-          - 桌面歌词：简化外观与窗口锁定交互，鼠标移出后隐藏锁定按钮。
-          - DLNA 投屏：改善息屏续播，降低后台状态查询频率以减少耗电。
+          - 播放器：只对解析为在线 HLS 的歌曲检测尾段卡顿，并在卡住时尝试恢复播放。
+          - 播放器缓存：按实际完成播放的歌曲缓存转码 HLS，避免缓存关联到错误歌曲。
 
           Commit: $GITHUB_SHA
           Build: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID
