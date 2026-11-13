@@ -59,7 +59,7 @@ void main() {
     });
   });
 
-  test('player cover defaults favour a calm rounded-square look', () async {
+  test('player cover defaults to a spinning vinyl record', () async {
     SharedPreferences.setMockInitialValues({});
     PlayerBackgroundSettings.resetForTest();
     await PlayerBackgroundSettings.ensureLoaded();
@@ -69,22 +69,22 @@ void main() {
       PlayerBackgroundSettings.defaultHueShift,
     );
     expect(PlayerBackgroundSettings.defaultHueShift, lessThanOrEqualTo(40));
-    expect(PlayerBackgroundSettings.roundCover.value, isFalse);
-    expect(PlayerBackgroundSettings.rotateCover.value, isFalse);
+    expect(PlayerBackgroundSettings.roundCover.value, isTrue);
+    expect(PlayerBackgroundSettings.rotateCover.value, isTrue);
   });
 
   test('stored cover preferences still win over the new defaults', () async {
     SharedPreferences.setMockInitialValues({
       'gradient_hue_shift': 120.0,
-      'player_round_cover': true,
-      'player_rotate_cover': true,
+      'player_round_cover': false,
+      'player_rotate_cover': false,
     });
     PlayerBackgroundSettings.resetForTest();
     await PlayerBackgroundSettings.ensureLoaded();
 
     expect(PlayerBackgroundSettings.hueShift.value, 120.0);
-    expect(PlayerBackgroundSettings.roundCover.value, isTrue);
-    expect(PlayerBackgroundSettings.rotateCover.value, isTrue);
+    expect(PlayerBackgroundSettings.roundCover.value, isFalse);
+    expect(PlayerBackgroundSettings.rotateCover.value, isFalse);
   });
 
   test('hidden seek thumb keeps its geometry so track insets stay aligned', () {

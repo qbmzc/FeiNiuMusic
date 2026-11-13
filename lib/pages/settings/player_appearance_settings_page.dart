@@ -241,8 +241,8 @@ class _PlayerAppearanceSettingsPageState
                         valueListenable: PlayerBackgroundSettings.roundCover,
                         builder: (context, enabled, _) {
                           return AppSettingSwitchTile(
-                            title: '圆形封面',
-                            subtitle: '播放页封面以圆形显示',
+                            title: '黑胶唱片',
+                            subtitle: '封面嵌在黑胶唱片中央显示',
                             value: enabled,
                             onChanged: (value) {
                               PlayerBackgroundSettings.setRoundCover(value);
@@ -261,8 +261,8 @@ class _PlayerAppearanceSettingsPageState
                                 PlayerBackgroundSettings.rotateCover,
                             builder: (context, enabled, _) {
                               return AppSettingSwitchTile(
-                                title: '旋转封面',
-                                subtitle: '播放时封面缓慢旋转',
+                                title: '旋转唱片',
+                                subtitle: '播放时缓慢旋转，暂停时缓缓停下',
                                 value: enabled,
                                 onChanged: (value) {
                                   PlayerBackgroundSettings.setRotateCover(

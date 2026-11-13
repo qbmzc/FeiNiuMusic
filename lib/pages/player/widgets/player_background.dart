@@ -59,8 +59,8 @@ class PlayerBackgroundSettings {
   static const double defaultHueShift = 30.0;
 
   static final ValueNotifier<double> hueShift = ValueNotifier(defaultHueShift);
-  static final ValueNotifier<bool> roundCover = ValueNotifier(false);
-  static final ValueNotifier<bool> rotateCover = ValueNotifier(false);
+  static final ValueNotifier<bool> roundCover = ValueNotifier(true);
+  static final ValueNotifier<bool> rotateCover = ValueNotifier(true);
 
   static Future<void>? _loading;
 
@@ -106,10 +106,10 @@ class PlayerBackgroundSettings {
         prefs.getBool(_prefsDynamicGradientEnabled) ?? true;
     saturation.value = prefs.getDouble(_prefsSaturation) ?? 1.2;
     hueShift.value = prefs.getDouble(_prefsHueShift) ?? defaultHueShift;
-    // 默认圆角方形、不旋转：圆形裁切会切掉方形封面四角的文字与人物。
-    roundCover.value = prefs.getBool(_prefsRoundCover) ?? false;
+    // 默认黑胶唱片样式并旋转。
+    roundCover.value = prefs.getBool(_prefsRoundCover) ?? true;
     rotateCover.value =
-        (prefs.getBool(_prefsRotateCover) ?? false) && roundCover.value;
+        (prefs.getBool(_prefsRotateCover) ?? true) && roundCover.value;
   }
 
   static Future<void> setImagePath(String? path) async {
@@ -144,8 +144,8 @@ class PlayerBackgroundSettings {
     dynamicGradientEnabled.value = true;
     saturation.value = 1.2;
     hueShift.value = defaultHueShift;
-    roundCover.value = false;
-    rotateCover.value = false;
+    roundCover.value = true;
+    rotateCover.value = true;
     imagePath.value = null;
     imageMaskOpacity.value = 0.4;
     imageBlurSigma.value = 0;

@@ -17,6 +17,7 @@ import '../../app/tv/tv_ui_scale.dart';
 import '../../app/utils/route_visibility.dart';
 import '../../components/common/artwork_widget.dart';
 import '../../components/player/lyric_preview.dart';
+import '../../components/player/vinyl_record.dart';
 import 'lyrics/lyric_view.dart';
 import 'widgets/cast_button.dart';
 import 'widgets/player_audio_spec.dart';
@@ -1201,26 +1202,30 @@ class _PlayerArtwork extends StatelessWidget {
                     final size = boxSize < constraints.maxHeight
                         ? boxSize
                         : constraints.maxHeight;
-                    final radius = roundCover && song != null
-                        ? size / 2
-                        : spec.borderRadius;
+                    final vinyl = roundCover && song != null;
+                    final radius = vinyl ? size / 2 : spec.borderRadius;
                     final border = BorderRadius.circular(radius);
-                    final Widget artwork = song == null
-                        ? _ArtworkPlaceholder(border: border, label: '')
-                        : _RotatingArtwork(
-                            song: song,
-                            buildArtwork: (context, onCoverAvailable) =>
-                                ArtworkWidget(
-                                  song: song,
-                                  size: size,
-                                  borderRadius: radius,
-                                  onCoverAvailableChanged: onCoverAvailable,
-                                  placeholder: _ArtworkPlaceholder(
-                                    border: border,
-                                    label: song.title,
-                                  ),
-                                ),
-                          );
+                    final Widget artwork;
+                    if (song == null) {
+                      artwork = _ArtworkPlaceholder(border: border, label: '');
+                    } else if (vinyl) {
+                      artwork = _VinylArtwork(song: song, size: size);
+                    } else {
+                      artwork = _RotatingArtwork(
+                        song: song,
+                        buildArtwork: (context, onCoverAvailable) =>
+                            ArtworkWidget(
+                              song: song,
+                              size: size,
+                              borderRadius: radius,
+                              onCoverAvailableChanged: onCoverAvailable,
+                              placeholder: _ArtworkPlaceholder(
+                                border: border,
+                                label: song.title,
+                              ),
+                            ),
+                      );
+                    }
                     return Center(
                       child: ValueListenableBuilder<bool>(
                         valueListenable: PlayerService.instance.isPlaying,
@@ -1333,11 +1338,53 @@ class _ArtworkShadowContainer extends StatelessWidget {
   }
 }
 
+/// 黑胶唱片封面：封面作为唱片中心标签随唱片旋转，高光与中心轴固定。
+class _VinylArtwork extends StatelessWidget {
+  final SongEntity song;
+  final double size;
+
+  const _VinylArtwork({required this.song, required this.size});
+
+  @override
+  Widget build(BuildContext context) {
+    final labelSize = VinylRecord.labelSize(size);
+    final labelBorder = BorderRadius.circular(labelSize / 2);
+    return Stack(
+      alignment: Alignment.center,
+      children: [
+        _RotatingArtwork(
+          song: song,
+          buildArtwork: (context, onCoverAvailable) =>
+              ValueListenableBuilder<Color?>(
+                valueListenable: PlayerCoverColor.instance.color,
+                builder: (context, tint, label) =>
+                    VinylRecordDisc(size: size, tint: tint, label: label!),
+                child: ArtworkWidget(
+                  song: song,
+                  size: labelSize,
+                  borderRadius: labelSize / 2,
+                  onCoverAvailableChanged: onCoverAvailable,
+                  placeholder: _ArtworkPlaceholder(
+                    border: labelBorder,
+                    label: song.title,
+                  ),
+                ),
+              ),
+        ),
+        VinylRecordGloss(size: size),
+      ],
+    );
+  }
+}
+
 /// 封面旋转门控：仅当显示真实封面图时才旋转。
 ///
 /// 通过 [ArtworkWidget.onCoverAvailableChanged] 获知当前是否显示真实封面：
 /// 加载中 / 加载失败（文字占位图 / 骨架）时保持静止，只有真实封面在
 /// 播放中才旋转。播放状态与「旋转封面」开关变化时自动启停旋转。
+///
+/// 旋转层始终挂载（只切换是否转动），避免启停时封面重建闪烁；切歌时
+/// 角度归零，像换上一张新唱片，再随播放平滑起转。
 class _RotatingArtwork extends StatefulWidget {
   /// 当前歌曲（null 表示无歌曲，显示占位图，不旋转）。
   final SongEntity? song;
@@ -1373,29 +1420,47 @@ class _RotatingArtworkState extends State<_RotatingArtwork> {
 
   @override
   Widget build(BuildContext context) {
+    final artwork = widget.buildArtwork(context, _setCoverAvailable);
     return ListenableBuilder(
       listenable: Listenable.merge([
         PlayerService.instance.isPlaying,
         PlayerBackgroundSettings.rotateCover,
       ]),
-      builder: (context, _) {
-        final playing = PlayerService.instance.isPlaying.value;
+      builder: (context, child) {
         final rotateEnabled = PlayerBackgroundSettings.rotateCover.value;
-        final artwork = widget.buildArtwork(context, _setCoverAvailable);
-        if (rotateEnabled && _hasRealCover) {
-          return _RotatingCover(playing: playing, child: artwork);
-        }
-        return artwork;
+        return _RotatingCover(
+          enabled: rotateEnabled,
+          spinning:
+              rotateEnabled &&
+              _hasRealCover &&
+              PlayerService.instance.isPlaying.value,
+          resetToken: widget.song?.id,
+          child: child!,
+        );
       },
+      child: artwork,
     );
   }
 }
 
+/// 封面旋转：带惯性的起转与停转。
+///
+/// 播放时约 1 秒平滑加速到匀速，暂停时像唱机断电一样缓缓减速停下，
+/// 而不是瞬间冻结。[enabled] 关闭时角度归零（封面摆正）。
 class _RotatingCover extends StatefulWidget {
-  final bool playing;
+  final bool enabled;
+  final bool spinning;
+
+  /// 变化时角度归零（切歌换唱片）。
+  final Object? resetToken;
   final Widget child;
 
-  const _RotatingCover({required this.playing, required this.child});
+  const _RotatingCover({
+    required this.enabled,
+    required this.spinning,
+    required this.resetToken,
+    required this.child,
+  });
 
   @override
   State<_RotatingCover> createState() => _RotatingCoverState();
@@ -1403,41 +1468,63 @@ class _RotatingCover extends StatefulWidget {
 
 class _RotatingCoverState extends State<_RotatingCover>
     with SingleTickerProviderStateMixin, AppRouteVisibilityMixin {
-  late AnimationController _controller;
+  /// 匀速：20 秒一圈。
+  static const double _turnsPerSecond = 1 / 20;
+  static const double _spinUpRate = 2.6;
+  static const double _spinDownRate = 1.6;
+
+  late final AnimationController _controller = AnimationController.unbounded(
+    vsync: this,
+  );
 
   @override
   AnimationController get visibilityController => _controller;
 
   @override
-  void initState() {
-    super.initState();
-    _controller = AnimationController(
-      vsync: this,
-      duration: const Duration(seconds: 20),
-    );
-    if (widget.playing) _controller.repeat();
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _drive();
   }
 
   @override
   void didUpdateWidget(_RotatingCover oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (widget.playing && !oldWidget.playing) {
-      _controller.repeat();
-    } else if (!widget.playing && oldWidget.playing) {
-      _controller.stop();
+    if (widget.resetToken != oldWidget.resetToken ||
+        (!widget.enabled && oldWidget.enabled)) {
+      _controller.value = 0;
+    }
+    if (widget.spinning != oldWidget.spinning ||
+        widget.enabled != oldWidget.enabled) {
+      _drive();
     }
   }
+
+  void _drive() {
+    final reduceMotion = MediaQuery.maybeDisableAnimationsOf(context) ?? false;
+    final target = widget.spinning && !reduceMotion ? _turnsPerSecond : 0.0;
+    final velocity = _controller.isAnimating ? _controller.velocity : 0.0;
+    if (target == 0 && velocity.abs() < 1e-4) {
+      _controller.stop();
+      return;
+    }
+    _controller.animateWith(
+      VinylSpinSimulation(
+        // 取模保持数值小，旋转角度不变。
+        start: _controller.value % 1,
+        initialVelocity: velocity,
+        targetVelocity: target,
+        rate: target > 0 ? _spinUpRate : _spinDownRate,
+      ),
+    );
+  }
+
+  @override
+  void resumeVisibilityAnimation() => _drive();
 
   @override
   void dispose() {
     _controller.dispose();
     super.dispose();
-  }
-
-  @override
-  void resumeVisibilityAnimation() {
-    // 仅播放中恢复旋转；暂停状态被覆盖后回来仍保持静止。
-    if (widget.playing) _controller.repeat();
   }
 
   @override
