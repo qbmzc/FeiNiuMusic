@@ -58,7 +58,9 @@ void main() {
             ),
           );
           await tester.tap(
-            find.byIcon(poster ? Icons.more_vert_rounded : Icons.more_horiz),
+            find.byIcon(
+              poster ? Icons.more_vert_rounded : Icons.more_horiz_rounded,
+            ),
           );
           await tester.pumpAndSettle();
 

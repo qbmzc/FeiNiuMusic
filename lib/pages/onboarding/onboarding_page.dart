@@ -618,8 +618,8 @@ class _PlayerAppearancePage extends StatelessWidget {
             return ValueListenableBuilder<bool>(
               valueListenable: PlayerBackgroundSettings.roundCover,
               builder: (context, enabled, _) => AppSettingSwitchTile(
-                title: '圆形封面',
-                subtitle: '播放页封面以圆形显示',
+                title: '黑胶唱片',
+                subtitle: '封面嵌在黑胶唱片中央显示',
                 value: enabled,
                 onChanged: (value) =>
                     PlayerBackgroundSettings.setRoundCover(value),

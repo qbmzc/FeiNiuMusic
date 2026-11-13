@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../app/state/settings_state.dart';
 import '../../pages/player/widgets/player_background.dart';
+import 'vinyl_record.dart';
 
 /// Mini preview of the player UI for a given [PlayerStylePreset].
 ///
@@ -140,12 +141,8 @@ class PlayerStylePreview extends StatelessWidget {
               ),
             ],
           ),
-          const SizedBox(height: 4),
-          _titleText(context, _sampleTitle, size: 11),
-          const SizedBox(height: 1),
-          _titleText(context, _sampleArtist, size: 7, secondary: true),
           // 封面占满可用宽度并保持正方形（对应实际播放页 Expanded+Center），
-          // 圆角跟随「圆形封面」开关。水平内边距收窄 → 封面更大
+          // 「黑胶唱片」开关打开时显示为唱片。水平内边距收窄 → 封面更大
           Expanded(
             flex: 8,
             child: Padding(
@@ -161,6 +158,7 @@ class PlayerStylePreview extends StatelessWidget {
                       final radius = (coverSize * 0.04).clamp(4.0, 12.0);
                       return _cover(
                         accent,
+                        size: coverSize,
                         circle: roundCover,
                         radius: radius,
                       );
@@ -170,13 +168,24 @@ class PlayerStylePreview extends StatelessWidget {
               ),
             ),
           ),
+          // 标题在封面下方（对应实际播放页的标题行）。
+          const SizedBox(height: 4),
+          _titleText(context, _sampleTitle, size: 11),
+          const SizedBox(height: 1),
+          _titleText(context, _sampleArtist, size: 7, secondary: true),
           // 迷你歌词预览：封面与控制栏之间上下居中（对应 _MiniLyricsPreview）
           Expanded(
             flex: 2,
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                _lyricLine(context, '有一束光 那瞬间', size: 7, centered: true, stretch: true),
+                _lyricLine(
+                  context,
+                  '有一束光 那瞬间',
+                  size: 7,
+                  centered: true,
+                  stretch: true,
+                ),
                 const SizedBox(height: 3),
                 _lyricLine(
                   context,
@@ -187,7 +196,13 @@ class PlayerStylePreview extends StatelessWidget {
                   stretch: true,
                 ),
                 const SizedBox(height: 3),
-                _lyricLine(context, '你的视线 是谅解', size: 7, centered: true, stretch: true),
+                _lyricLine(
+                  context,
+                  '你的视线 是谅解',
+                  size: 7,
+                  centered: true,
+                  stretch: true,
+                ),
               ],
             ),
           ),
@@ -262,7 +277,12 @@ class PlayerStylePreview extends StatelessWidget {
                     children: [
                       _titleText(context, _sampleTitle, size: 11),
                       const SizedBox(height: 2),
-                      _titleText(context, _sampleArtist, size: 7, secondary: true),
+                      _titleText(
+                        context,
+                        _sampleArtist,
+                        size: 7,
+                        secondary: true,
+                      ),
                       const SizedBox(height: 8),
                       _lyricLine(context, '有一束光 那瞬间', size: 7),
                       const SizedBox(height: 5),
@@ -299,23 +319,14 @@ class PlayerStylePreview extends StatelessWidget {
     );
   }
 
-  Widget _cover(Color color, {double? size, double? radius, bool circle = false}) {
+  Widget _cover(
+    Color color, {
+    double? size,
+    double? radius,
+    bool circle = false,
+  }) {
     final clip = circle
-        ? ClipOval(
-            child: Image.asset(
-              _coverAsset,
-              fit: BoxFit.cover,
-              errorBuilder: (context, error, stackTrace) => Container(
-                alignment: Alignment.center,
-                decoration: BoxDecoration(color: color),
-                child: Icon(
-                  Icons.music_note_rounded,
-                  size: (size ?? 62) * 0.4,
-                  color: Colors.white.withValues(alpha: 0.9),
-                ),
-              ),
-            ),
-          )
+        ? _vinylCover(color, size ?? 62)
         : ClipRRect(
             borderRadius: BorderRadius.circular(radius ?? 0),
             child: Image.asset(
@@ -343,6 +354,35 @@ class PlayerStylePreview extends StatelessWidget {
           );
     if (size == null) return SizedBox.expand(child: clip);
     return SizedBox(width: size, height: size, child: clip);
+  }
+
+  /// 「黑胶唱片」预览：与播放页同款唱片（静态，不旋转）。
+  Widget _vinylCover(Color color, double size) {
+    final labelSize = VinylRecord.labelSize(size);
+    return Stack(
+      alignment: Alignment.center,
+      children: [
+        VinylRecordDisc(
+          size: size,
+          tint: color,
+          label: Image.asset(
+            _coverAsset,
+            width: labelSize,
+            height: labelSize,
+            fit: BoxFit.cover,
+            errorBuilder: (context, error, stackTrace) => ColoredBox(
+              color: color,
+              child: Icon(
+                Icons.music_note_rounded,
+                size: labelSize * 0.4,
+                color: Colors.white.withValues(alpha: 0.9),
+              ),
+            ),
+          ),
+        ),
+        VinylRecordGloss(size: size),
+      ],
+    );
   }
 
   Widget _titleText(

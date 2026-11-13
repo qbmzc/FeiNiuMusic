@@ -17,6 +17,7 @@ import '../../app/tv/tv_ui_scale.dart';
 import '../../app/utils/route_visibility.dart';
 import '../../components/common/artwork_widget.dart';
 import '../../components/player/lyric_preview.dart';
+import '../../components/player/vinyl_record.dart';
 import 'lyrics/lyric_view.dart';
 import 'widgets/cast_button.dart';
 import 'widgets/player_audio_spec.dart';
@@ -24,6 +25,9 @@ import 'widgets/player_background.dart';
 import 'widgets/player_bottom_panel.dart';
 import 'widgets/player_header.dart';
 import 'widgets/player_favorite_button.dart';
+import 'widgets/player_portrait_top_bar.dart';
+import 'widgets/player_seek_track.dart';
+import 'widgets/player_typography.dart';
 import 'tv_player_focus_scope.dart';
 
 class PlayerPage extends StatefulWidget {
@@ -236,9 +240,9 @@ class _PlayerPageState extends State<PlayerPage>
                             onVerticalDragCancel: _handleDismissDragCancel,
                             child: isPoster || isLandscapePlayer
                                 ? const SizedBox.shrink()
-                                : PlayerHeader(
+                                : PlayerPortraitTopBar(
                                     songSignal: _player.currentSongSignal,
-                                    stylePreset: stylePreset,
+                                    pageController: _pageController,
                                   ),
                           ),
                           Expanded(
@@ -418,6 +422,13 @@ class _MobilePlayerLayout extends StatelessWidget {
               stylePreset: stylePreset,
             ),
           ),
+        ),
+        // 标题紧贴控制区：封面 → 歌曲信息 → 进度/控制，视线自上而下一条线。
+        PlayerHeader(
+          songSignal: player.currentSongSignal,
+          stylePreset: stylePreset,
+          showCastButton: false,
+          padding: const EdgeInsets.fromLTRB(32, 20, 24, 4),
         ),
         PlayerBottomPanel(
           player: player,
@@ -677,23 +688,14 @@ class _PosterPlayerLayout extends StatelessWidget {
                             title,
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                              color: scheme.onSurface,
-                              fontSize: 23,
-                              fontWeight: FontWeight.w800,
-                              height: 1.05,
-                            ),
+                            style: PlayerTypography.title(scheme),
                           ),
-                          const SizedBox(height: 5),
+                          const SizedBox(height: 4),
                           Text(
                             artist,
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                              color: scheme.onSurface.withValues(alpha: 0.86),
-                              fontSize: 15,
-                              fontWeight: FontWeight.w700,
-                            ),
+                            style: PlayerTypography.subtitle(scheme),
                           ),
                         ],
                       ),
@@ -1049,77 +1051,86 @@ class _PosterSeekBarState extends State<_PosterSeekBar> with SignalsMixin {
         final bufferedRatio = totalMs > 0
             ? (buffered.inMilliseconds / totalMs).clamp(0.0, 1.0)
             : 0.0;
+        final dragValue = _dragValue.value;
+        final timeStyle = PlayerTypography.time(scheme);
         return Column(
           children: [
-            // 进度条
-            // Slider 轨道两端默认按 max(overlayWidth, thumbWidth)/2 内缩：
-            // overlay 半径 0、thumb 半径 6 → 每端内缩 6px，并不能真正占满
-            // 全宽。因此下方加载条两端也用相同的 _posterTrackInset，两条轨道几何
-            // 完全一致、重叠对齐，避免加载条在左端多出一截灰色。
-            SizedBox(
-              height: 24,
-              child: Stack(
-                alignment: Alignment.center,
-                children: [
-                  Positioned.fill(
-                    child: Padding(
-                      // 水平方向与 Slider 轨道内缩一致（_posterTrackInset=6），两端
-                      // 对齐，保证加载条与进度条完全重叠。
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: _posterTrackInset,
-                        vertical: 10,
-                      ),
-                      child: ClipRRect(
-                        borderRadius: BorderRadius.circular(2),
-                        child: LinearProgressIndicator(
-                          value: bufferedRatio,
-                          backgroundColor: Colors.transparent,
-                          valueColor: AlwaysStoppedAnimation(
-                            scheme.onSurface.withValues(alpha: 0.22),
+            // 进度条：平时细轨道、无滑块；拖动时轨道变粗、滑块浮现。
+            // Slider 轨道两端按滑块 preferred size（半径 _posterTrackInset）内缩，
+            // PlayerSeekThumbShape 隐藏时仍按该半径占位，几何与加载条/时间标签
+            // /按钮行保持对齐。
+            TweenAnimationBuilder<double>(
+              tween: Tween(end: dragValue == null ? 0 : 1),
+              duration: playerSeekTrackAnimation,
+              curve: Curves.easeOutCubic,
+              builder: (context, active, _) {
+                final trackHeight = ui.lerpDouble(4, 7, active)!;
+                return SizedBox(
+                  height: 24,
+                  child: Stack(
+                    alignment: Alignment.center,
+                    children: [
+                      Positioned.fill(
+                        child: Padding(
+                          padding: EdgeInsets.symmetric(
+                            horizontal: _posterTrackInset,
+                            vertical: (24 - trackHeight) / 2,
                           ),
-                          minHeight: 3,
+                          child: ClipRRect(
+                            borderRadius: BorderRadius.circular(
+                              trackHeight / 2,
+                            ),
+                            child: LinearProgressIndicator(
+                              value: bufferedRatio,
+                              backgroundColor: Colors.transparent,
+                              valueColor: AlwaysStoppedAnimation(
+                                scheme.onSurface.withValues(alpha: 0.2),
+                              ),
+                              minHeight: trackHeight,
+                            ),
+                          ),
                         ),
                       ),
-                    ),
+                      SliderTheme(
+                        data: SliderTheme.of(context).copyWith(
+                          trackHeight: trackHeight,
+                          trackShape: const RoundedRectSliderTrackShape(),
+                          thumbShape: PlayerSeekThumbShape(
+                            preferredRadius: _posterTrackInset,
+                            paintRadius: 7 * active,
+                          ),
+                          overlayShape: const RoundSliderOverlayShape(
+                            overlayRadius: 0,
+                          ),
+                          activeTrackColor: scheme.onSurface.withValues(
+                            alpha: 0.9,
+                          ),
+                          inactiveTrackColor: scheme.onSurface.withValues(
+                            alpha: 0.12,
+                          ),
+                          thumbColor: scheme.onSurface,
+                        ),
+                        child: Slider(
+                          value: value.toDouble(),
+                          min: 0,
+                          max: max,
+                          onChanged: totalMs <= 0
+                              ? null
+                              : (next) => _dragValue.value = next,
+                          onChangeEnd: totalMs <= 0
+                              ? null
+                              : (next) {
+                                  _dragValue.value = null;
+                                  widget.player.seek(
+                                    Duration(milliseconds: next.round()),
+                                  );
+                                },
+                        ),
+                      ),
+                    ],
                   ),
-                  // 播放进度滑块
-                  SliderTheme(
-                    data: SliderTheme.of(context).copyWith(
-                      trackHeight: 3,
-                      trackShape: const RoundedRectSliderTrackShape(),
-                      thumbShape: const RoundSliderThumbShape(
-                        enabledThumbRadius: _posterTrackInset,
-                      ),
-                      overlayShape: const RoundSliderOverlayShape(
-                        overlayRadius: 0,
-                      ),
-                      activeTrackColor: scheme.onSurface.withValues(
-                        alpha: 0.64,
-                      ),
-                      inactiveTrackColor: scheme.onSurface.withValues(
-                        alpha: 0.13,
-                      ),
-                      thumbColor: scheme.onSurface,
-                    ),
-                    child: Slider(
-                      value: value.toDouble(),
-                      min: 0,
-                      max: max,
-                      onChanged: totalMs <= 0
-                          ? null
-                          : (next) => _dragValue.value = next,
-                      onChangeEnd: totalMs <= 0
-                          ? null
-                          : (next) {
-                              _dragValue.value = null;
-                              widget.player.seek(
-                                Duration(milliseconds: next.round()),
-                              );
-                            },
-                    ),
-                  ),
-                ],
-              ),
+                );
+              },
             ),
             // 时间标签：位于进度条下方，两端与轨道内缩（_posterTrackInset）对齐，
             // 不超出进度条两端的实际长度。
@@ -1131,21 +1142,12 @@ class _PosterSeekBarState extends State<_PosterSeekBar> with SignalsMixin {
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   Text(
-                    _format(Duration(milliseconds: currentMs)),
-                    style: TextStyle(
-                      color: scheme.onSurfaceVariant.withValues(alpha: 0.78),
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
+                    _format(
+                      Duration(milliseconds: (dragValue ?? currentMs).round()),
                     ),
+                    style: timeStyle,
                   ),
-                  Text(
-                    _format(duration),
-                    style: TextStyle(
-                      color: scheme.onSurfaceVariant.withValues(alpha: 0.78),
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
+                  Text(_format(duration), style: timeStyle),
                 ],
               ),
             ),
@@ -1166,6 +1168,9 @@ class _PlayerArtwork extends StatelessWidget {
     required this.stylePreset,
   });
 
+  /// 暂停时封面微缩，播放时回弹：不开旋转也能一眼看出播放状态。
+  static const double _pausedScale = 0.9;
+
   @override
   Widget build(BuildContext context) {
     return ValueListenableBuilder<bool>(
@@ -1174,17 +1179,17 @@ class _PlayerArtwork extends StatelessWidget {
         final isTabletLayout =
             effectiveTabletMode && MediaQuery.sizeOf(context).width >= 720;
         final isTv = AppLayoutSettings.tvMode.value;
-        return Watch.builder(
-          builder: (context) {
-            final song = songSignal.value;
-            final spec = _ArtworkSpec.fromPreset(
-              stylePreset,
-              isTabletLayout,
-              isTv,
-            );
-            final border = BorderRadius.circular(spec.borderRadius);
-            final maxSize = spec.maxSize;
-            if (song == null) {
+        return ValueListenableBuilder<bool>(
+          valueListenable: PlayerBackgroundSettings.roundCover,
+          builder: (context, roundCover, _) => Watch.builder(
+            builder: (context) {
+              final song = songSignal.value;
+              final spec = _ArtworkSpec.fromPreset(
+                stylePreset,
+                isTabletLayout,
+                isTv,
+              );
+              final maxSize = spec.maxSize;
               return Padding(
                 padding: EdgeInsets.symmetric(horizontal: spec.horizontalInset),
                 child: LayoutBuilder(
@@ -1197,59 +1202,55 @@ class _PlayerArtwork extends StatelessWidget {
                     final size = boxSize < constraints.maxHeight
                         ? boxSize
                         : constraints.maxHeight;
+                    final vinyl = roundCover && song != null;
+                    final radius = vinyl ? size / 2 : spec.borderRadius;
+                    final border = BorderRadius.circular(radius);
+                    final Widget artwork;
+                    if (song == null) {
+                      artwork = _ArtworkPlaceholder(border: border, label: '');
+                    } else if (vinyl) {
+                      artwork = _VinylArtwork(song: song, size: size);
+                    } else {
+                      artwork = _RotatingArtwork(
+                        song: song,
+                        buildArtwork: (context, onCoverAvailable) =>
+                            ArtworkWidget(
+                              song: song,
+                              size: size,
+                              borderRadius: radius,
+                              onCoverAvailableChanged: onCoverAvailable,
+                              placeholder: _ArtworkPlaceholder(
+                                border: border,
+                                label: song.title,
+                              ),
+                            ),
+                      );
+                    }
                     return Center(
-                      child: SizedBox(
-                        width: size,
-                        height: size,
-                        child: _ArtworkShadowContainer(
-                          border: border,
-                          child: _ArtworkPlaceholder(border: border, label: ''),
+                      child: ValueListenableBuilder<bool>(
+                        valueListenable: PlayerService.instance.isPlaying,
+                        builder: (context, playing, child) => AnimatedScale(
+                          scale: playing || song == null ? 1 : _pausedScale,
+                          duration: const Duration(milliseconds: 420),
+                          curve: Curves.easeOutCubic,
+                          child: child,
+                        ),
+                        child: SizedBox(
+                          width: size,
+                          height: size,
+                          child: _ArtworkShadowContainer(
+                            border: border,
+                            size: size,
+                            child: artwork,
+                          ),
                         ),
                       ),
                     );
                   },
                 ),
               );
-            }
-            return Padding(
-              padding: EdgeInsets.symmetric(horizontal: spec.horizontalInset),
-              child: LayoutBuilder(
-                builder: (context, constraints) {
-                  final width = constraints.maxWidth;
-                  final boxSize = width < maxSize ? width : maxSize;
-                  final size = boxSize < constraints.maxHeight
-                      ? boxSize
-                      : constraints.maxHeight;
-                  final borderRadius = PlayerBackgroundSettings.roundCover.value
-                      ? size / 2
-                      : 12.0;
-                  return Center(
-                    child: SizedBox(
-                      width: size,
-                      height: size,
-                      child: _ArtworkShadowContainer(
-                        border: border,
-                        child: _RotatingArtwork(
-                          song: song,
-                          buildArtwork: (context, onCoverAvailable) =>
-                              ArtworkWidget(
-                                song: song,
-                                size: size,
-                                borderRadius: borderRadius,
-                                onCoverAvailableChanged: onCoverAvailable,
-                                placeholder: _ArtworkPlaceholder(
-                                  border: border,
-                                  label: song.title,
-                                ),
-                              ),
-                        ),
-                      ),
-                    ),
-                  );
-                },
-              ),
-            );
-          },
+            },
+          ),
         );
       },
     );
@@ -1276,13 +1277,13 @@ class _ArtworkSpec {
       case PlayerStylePreset.poster:
         // TV 大屏放开封面上限，让封面用满可用空间（横向布局下高度充足）。
         return _ArtworkSpec(
-          borderRadius: 0,
+          borderRadius: 16,
           horizontalInset: 0,
           maxSize: isTv ? 640 : (isTablet ? 360 : double.infinity),
         );
       case PlayerStylePreset.classic:
         return _ArtworkSpec(
-          borderRadius: 12,
+          borderRadius: 16,
           horizontalInset: 32,
           maxSize: isTv ? 560 : (isTablet ? 320 : double.infinity),
         );
@@ -1290,15 +1291,89 @@ class _ArtworkSpec {
   }
 }
 
+/// 封面容器：圆角裁切 + 封面主色的柔和投影，让封面从背景上浮起。
 class _ArtworkShadowContainer extends StatelessWidget {
   final BorderRadius border;
+  final double size;
   final Widget child;
 
-  const _ArtworkShadowContainer({required this.border, required this.child});
+  const _ArtworkShadowContainer({
+    required this.border,
+    required this.size,
+    required this.child,
+  });
 
   @override
   Widget build(BuildContext context) {
-    return ClipRRect(borderRadius: border, child: child);
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return ValueListenableBuilder<Color?>(
+      valueListenable: PlayerCoverColor.instance.color,
+      builder: (context, coverColor, child) {
+        final tint = coverColor ?? Colors.black;
+        final shadowColor = (Color.lerp(
+          tint,
+          Colors.black,
+          isDark ? 0.55 : 0.25,
+        )!).withValues(alpha: isDark ? 0.5 : 0.32);
+        return DecoratedBox(
+          decoration: BoxDecoration(
+            borderRadius: border,
+            boxShadow: [
+              BoxShadow(
+                color: shadowColor,
+                blurRadius: (size * 0.12).clamp(16.0, 48.0),
+                spreadRadius: -size * 0.02,
+                offset: Offset(0, (size * 0.05).clamp(6.0, 20.0)),
+              ),
+            ],
+          ),
+          child: child,
+        );
+      },
+      // 封面旋转每帧重绘，隔离到独立图层，避免连带重绘大面积模糊阴影。
+      child: RepaintBoundary(
+        child: ClipRRect(borderRadius: border, child: child),
+      ),
+    );
+  }
+}
+
+/// 黑胶唱片封面：封面作为唱片中心标签随唱片旋转，高光与中心轴固定。
+class _VinylArtwork extends StatelessWidget {
+  final SongEntity song;
+  final double size;
+
+  const _VinylArtwork({required this.song, required this.size});
+
+  @override
+  Widget build(BuildContext context) {
+    final labelSize = VinylRecord.labelSize(size);
+    final labelBorder = BorderRadius.circular(labelSize / 2);
+    return Stack(
+      alignment: Alignment.center,
+      children: [
+        _RotatingArtwork(
+          song: song,
+          buildArtwork: (context, onCoverAvailable) =>
+              ValueListenableBuilder<Color?>(
+                valueListenable: PlayerCoverColor.instance.color,
+                builder: (context, tint, label) =>
+                    VinylRecordDisc(size: size, tint: tint, label: label!),
+                child: ArtworkWidget(
+                  song: song,
+                  size: labelSize,
+                  borderRadius: labelSize / 2,
+                  onCoverAvailableChanged: onCoverAvailable,
+                  placeholder: _ArtworkPlaceholder(
+                    border: labelBorder,
+                    label: song.title,
+                  ),
+                ),
+              ),
+        ),
+        VinylRecordGloss(size: size),
+      ],
+    );
   }
 }
 
@@ -1307,6 +1382,9 @@ class _ArtworkShadowContainer extends StatelessWidget {
 /// 通过 [ArtworkWidget.onCoverAvailableChanged] 获知当前是否显示真实封面：
 /// 加载中 / 加载失败（文字占位图 / 骨架）时保持静止，只有真实封面在
 /// 播放中才旋转。播放状态与「旋转封面」开关变化时自动启停旋转。
+///
+/// 旋转层始终挂载（只切换是否转动），避免启停时封面重建闪烁；切歌时
+/// 角度归零，像换上一张新唱片，再随播放平滑起转。
 class _RotatingArtwork extends StatefulWidget {
   /// 当前歌曲（null 表示无歌曲，显示占位图，不旋转）。
   final SongEntity? song;
@@ -1342,29 +1420,47 @@ class _RotatingArtworkState extends State<_RotatingArtwork> {
 
   @override
   Widget build(BuildContext context) {
+    final artwork = widget.buildArtwork(context, _setCoverAvailable);
     return ListenableBuilder(
       listenable: Listenable.merge([
         PlayerService.instance.isPlaying,
         PlayerBackgroundSettings.rotateCover,
       ]),
-      builder: (context, _) {
-        final playing = PlayerService.instance.isPlaying.value;
+      builder: (context, child) {
         final rotateEnabled = PlayerBackgroundSettings.rotateCover.value;
-        final artwork = widget.buildArtwork(context, _setCoverAvailable);
-        if (rotateEnabled && _hasRealCover) {
-          return _RotatingCover(playing: playing, child: artwork);
-        }
-        return artwork;
+        return _RotatingCover(
+          enabled: rotateEnabled,
+          spinning:
+              rotateEnabled &&
+              _hasRealCover &&
+              PlayerService.instance.isPlaying.value,
+          resetToken: widget.song?.id,
+          child: child!,
+        );
       },
+      child: artwork,
     );
   }
 }
 
+/// 封面旋转：带惯性的起转与停转。
+///
+/// 播放时约 1 秒平滑加速到匀速，暂停时像唱机断电一样缓缓减速停下，
+/// 而不是瞬间冻结。[enabled] 关闭时角度归零（封面摆正）。
 class _RotatingCover extends StatefulWidget {
-  final bool playing;
+  final bool enabled;
+  final bool spinning;
+
+  /// 变化时角度归零（切歌换唱片）。
+  final Object? resetToken;
   final Widget child;
 
-  const _RotatingCover({required this.playing, required this.child});
+  const _RotatingCover({
+    required this.enabled,
+    required this.spinning,
+    required this.resetToken,
+    required this.child,
+  });
 
   @override
   State<_RotatingCover> createState() => _RotatingCoverState();
@@ -1372,41 +1468,63 @@ class _RotatingCover extends StatefulWidget {
 
 class _RotatingCoverState extends State<_RotatingCover>
     with SingleTickerProviderStateMixin, AppRouteVisibilityMixin {
-  late AnimationController _controller;
+  /// 匀速：20 秒一圈。
+  static const double _turnsPerSecond = 1 / 20;
+  static const double _spinUpRate = 2.6;
+  static const double _spinDownRate = 1.6;
+
+  late final AnimationController _controller = AnimationController.unbounded(
+    vsync: this,
+  );
 
   @override
   AnimationController get visibilityController => _controller;
 
   @override
-  void initState() {
-    super.initState();
-    _controller = AnimationController(
-      vsync: this,
-      duration: const Duration(seconds: 20),
-    );
-    if (widget.playing) _controller.repeat();
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _drive();
   }
 
   @override
   void didUpdateWidget(_RotatingCover oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (widget.playing && !oldWidget.playing) {
-      _controller.repeat();
-    } else if (!widget.playing && oldWidget.playing) {
-      _controller.stop();
+    if (widget.resetToken != oldWidget.resetToken ||
+        (!widget.enabled && oldWidget.enabled)) {
+      _controller.value = 0;
+    }
+    if (widget.spinning != oldWidget.spinning ||
+        widget.enabled != oldWidget.enabled) {
+      _drive();
     }
   }
+
+  void _drive() {
+    final reduceMotion = MediaQuery.maybeDisableAnimationsOf(context) ?? false;
+    final target = widget.spinning && !reduceMotion ? _turnsPerSecond : 0.0;
+    final velocity = _controller.isAnimating ? _controller.velocity : 0.0;
+    if (target == 0 && velocity.abs() < 1e-4) {
+      _controller.stop();
+      return;
+    }
+    _controller.animateWith(
+      VinylSpinSimulation(
+        // 取模保持数值小，旋转角度不变。
+        start: _controller.value % 1,
+        initialVelocity: velocity,
+        targetVelocity: target,
+        rate: target > 0 ? _spinUpRate : _spinDownRate,
+      ),
+    );
+  }
+
+  @override
+  void resumeVisibilityAnimation() => _drive();
 
   @override
   void dispose() {
     _controller.dispose();
     super.dispose();
-  }
-
-  @override
-  void resumeVisibilityAnimation() {
-    // 仅播放中恢复旋转；暂停状态被覆盖后回来仍保持静止。
-    if (widget.playing) _controller.repeat();
   }
 
   @override
@@ -1428,7 +1546,11 @@ class _ArtworkPlaceholder extends StatelessWidget {
     return Container(
       decoration: BoxDecoration(
         borderRadius: border,
-        color: scheme.primary.withValues(alpha: 0.12),
+        // 不透明底色：封面下方有投影，半透明会透出阴影形成「双层框」。
+        color: Color.alphaBlend(
+          scheme.primary.withValues(alpha: 0.16),
+          scheme.surfaceContainerHigh,
+        ),
       ),
       child: Center(
         child: Text(

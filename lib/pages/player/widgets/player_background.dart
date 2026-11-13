@@ -6,6 +6,7 @@ import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:material_color_utilities/material_color_utilities.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:signals_flutter/signals_flutter.dart' hide computed;
 
@@ -53,7 +54,11 @@ class PlayerBackgroundSettings {
   );
   static final ValueNotifier<bool> dynamicGradientEnabled = ValueNotifier(true);
   static final ValueNotifier<double> saturation = ValueNotifier(1.2);
-  static final ValueNotifier<double> hueShift = ValueNotifier(120.0);
+
+  /// 默认色相偏移：小角度做同色系渐变，避免混入近互补色显得杂乱。
+  static const double defaultHueShift = 30.0;
+
+  static final ValueNotifier<double> hueShift = ValueNotifier(defaultHueShift);
   static final ValueNotifier<bool> roundCover = ValueNotifier(true);
   static final ValueNotifier<bool> rotateCover = ValueNotifier(true);
 
@@ -100,7 +105,8 @@ class PlayerBackgroundSettings {
     dynamicGradientEnabled.value =
         prefs.getBool(_prefsDynamicGradientEnabled) ?? true;
     saturation.value = prefs.getDouble(_prefsSaturation) ?? 1.2;
-    hueShift.value = prefs.getDouble(_prefsHueShift) ?? 120.0;
+    hueShift.value = prefs.getDouble(_prefsHueShift) ?? defaultHueShift;
+    // 默认黑胶唱片样式并旋转。
     roundCover.value = prefs.getBool(_prefsRoundCover) ?? true;
     rotateCover.value =
         (prefs.getBool(_prefsRotateCover) ?? true) && roundCover.value;
@@ -137,7 +143,7 @@ class PlayerBackgroundSettings {
     playbackThemeMode.value = ThemeMode.system;
     dynamicGradientEnabled.value = true;
     saturation.value = 1.2;
-    hueShift.value = 120;
+    hueShift.value = defaultHueShift;
     roundCover.value = true;
     rotateCover.value = true;
     imagePath.value = null;
@@ -219,17 +225,22 @@ class PlayerTheme extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return AnimatedBuilder(
-      animation: PlayerBackgroundSettings.playbackThemeMode,
+      animation: Listenable.merge([
+        PlayerBackgroundSettings.playbackThemeMode,
+        PlayerCoverColor.instance.color,
+      ]),
       builder: (context, _) {
         final mode = PlayerBackgroundSettings.playbackThemeMode.value;
         final brightness = playerBrightnessForMode(context, mode);
+        final coverColor = PlayerCoverColor.instance.color.value;
         final base = Theme.of(context);
-        if (base.brightness == brightness) {
+        if (coverColor == null && base.brightness == brightness) {
           return child;
         }
-        final scheme = ColorScheme.fromSeed(
-          seedColor: base.colorScheme.primary,
-          brightness: brightness,
+        // 以封面主色为种子：控件强调色与封面/流光背景同色系。
+        final scheme = _playerSchemeFor(
+          coverColor ?? base.colorScheme.primary,
+          brightness,
         );
         return Theme(
           data: base.copyWith(
@@ -248,13 +259,101 @@ class PlayerTheme extends StatelessWidget {
   }
 }
 
-class _PlayerBackgroundState extends State<PlayerBackground> {
-  static const int _dominantCacheLimit = 128;
-  static final Map<String, Color> _dominantCache = {};
-  static final Map<String, Future<Color?>> _dominantInflight = {};
+ColorScheme? _cachedPlayerScheme;
+Color? _cachedPlayerSchemeSeed;
+Brightness? _cachedPlayerSchemeBrightness;
 
-  String? _lastCoverPath;
-  Color? _dominantColor;
+ColorScheme _playerSchemeFor(Color seed, Brightness brightness) {
+  final cached = _cachedPlayerScheme;
+  if (cached != null &&
+      _cachedPlayerSchemeSeed == seed &&
+      _cachedPlayerSchemeBrightness == brightness) {
+    return cached;
+  }
+  final scheme = ColorScheme.fromSeed(seedColor: seed, brightness: brightness);
+  _cachedPlayerScheme = scheme;
+  _cachedPlayerSchemeSeed = seed;
+  _cachedPlayerSchemeBrightness = brightness;
+  return scheme;
+}
+
+/// 当前播放歌曲封面的主色，播放页背景、播放页主题与封面阴影共用。
+///
+/// 由 [PlayerBackground] 按当前歌曲的 coverId 驱动；切歌取色期间保留上一首
+/// 的颜色，新颜色到达后背景再平滑过渡，避免先闪回主题色再跳到新色。
+class PlayerCoverColor {
+  PlayerCoverColor._();
+
+  static final PlayerCoverColor instance = PlayerCoverColor._();
+
+  static const int _cacheLimit = 128;
+
+  final ValueNotifier<Color?> color = ValueNotifier(null);
+  final Map<String, Color> _cache = {};
+  final Map<String, Future<Color?>> _inflight = {};
+  String? _coverId;
+
+  /// 切换跟踪的封面。会同步通知监听者，不要在 build 阶段直接调用。
+  Future<void> track(String? coverId) async {
+    if (_coverId == coverId) return;
+    _coverId = coverId;
+    if (coverId == null || coverId.isEmpty) {
+      color.value = null;
+      return;
+    }
+    final cached = _cache[coverId];
+    if (cached != null) {
+      color.value = cached;
+      return;
+    }
+    final next = await (_inflight[coverId] ??= _computeCoverColor(coverId));
+    _inflight.remove(coverId);
+    if (next != null) {
+      if (_cache.length >= _cacheLimit) {
+        // Insertion-ordered map: evict the oldest entry to bound memory.
+        _cache.remove(_cache.keys.first);
+      }
+      _cache[coverId] = next;
+    }
+    if (_coverId != coverId) return;
+    color.value = next;
+  }
+
+  @visibleForTesting
+  void resetForTest() {
+    _coverId = null;
+    _cache.clear();
+    _inflight.clear();
+    color.value = null;
+  }
+
+  Future<Color?> _computeCoverColor(String coverId) async {
+    final dio = Dio();
+    try {
+      final api = FeiNiuApiClient.instance;
+      // 仅用于取主色调的下采样（非显示），刻意用小图节省带宽与解码；
+      // 不参与封面显示的缓存复用。
+      final url = api.coverUrl(coverId, size: 64);
+      final response = await dio.get(
+        url,
+        options: Options(
+          responseType: ResponseType.bytes,
+          headers: api.authHeaders(),
+        ),
+      );
+      final bytes = response.data as Uint8List;
+      return await dominantImageColor(bytes);
+    } catch (error) {
+      if (kDebugMode) debugPrint('Cover color extraction failed: $error');
+      return null;
+    } finally {
+      dio.close(force: true);
+    }
+  }
+}
+
+class _PlayerBackgroundState extends State<PlayerBackground> {
+  String? _trackedCoverId;
 
   @override
   void initState() {
@@ -270,6 +369,7 @@ class _PlayerBackgroundState extends State<PlayerBackground> {
         final song = widget.songSignal.value;
         return AnimatedBuilder(
           animation: Listenable.merge([
+            PlayerCoverColor.instance.color,
             PlayerBackgroundSettings.playbackThemeMode,
             PlayerBackgroundSettings.dynamicGradientEnabled,
             PlayerBackgroundSettings.saturation,
@@ -294,7 +394,9 @@ class _PlayerBackgroundState extends State<PlayerBackground> {
             final preferLight = _preferLightBackground(context, playbackMode);
             final surface = _tintSurface(scheme.surface, preferLight);
             final dominant =
-                widget.dominantColor ?? _dominantColor ?? scheme.primary;
+                widget.dominantColor ??
+                PlayerCoverColor.instance.color.value ??
+                scheme.primary;
             final baseColor = _adjustBackground(dominant, preferLight);
             final Widget fallback = dynamicEnabled
                 ? _DynamicGradientBackground(
@@ -321,75 +423,28 @@ class _PlayerBackgroundState extends State<PlayerBackground> {
     );
   }
 
-  void _handleCoverChange(String? coverPath) {
+  void _handleCoverChange(String? coverId) {
     // When a fixed dominant color is supplied (e.g. the 流光 preview), the song
     // cover never drives the background, so skip the file probe entirely.
     if (widget.dominantColor != null) return;
-    if (_lastCoverPath == coverPath) return;
-    _lastCoverPath = coverPath;
-    _dominantColor = null;
-    if (coverPath == null || coverPath.isEmpty) return;
+    if (_trackedCoverId == coverId) return;
+    _trackedCoverId = coverId;
+    // track() 会同步通知监听者（含祖先的 PlayerTheme），build 阶段不能直接调。
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      _loadDominantColor(coverPath);
-    });
-  }
-
-  Future<void> _loadDominantColor(String coverPath) async {
-    final cached = _dominantCache[coverPath];
-    if (cached != null) {
       if (!mounted) return;
-      setState(() => _dominantColor = cached);
-      return;
-    }
-    final future =
-        _dominantInflight[coverPath] ??
-        (_dominantInflight[coverPath] = _computeDominantColor(coverPath));
-    final color = await future;
-    _dominantInflight.remove(coverPath);
-    if (!mounted) return;
-    if (_lastCoverPath != coverPath) return;
-    if (color != null) {
-      if (_dominantCache.length >= _dominantCacheLimit) {
-        // Insertion-ordered map: evict the oldest entry to bound memory.
-        _dominantCache.remove(_dominantCache.keys.first);
-      }
-      _dominantCache[coverPath] = color;
-    }
-    setState(() => _dominantColor = color);
-  }
-
-  Future<Color?> _computeDominantColor(String coverId) async {
-    final dio = Dio();
-    try {
-      final api = FeiNiuApiClient.instance;
-      // 仅用于取主色调的下采样（非显示），刻意用小图 40px 节省带宽与解码；
-      // 不参与封面显示的缓存复用。
-      final url = api.coverUrl(coverId, size: 40);
-      final response = await dio.get(
-        url,
-        options: Options(
-          responseType: ResponseType.bytes,
-          headers: api.authHeaders(),
-        ),
-      );
-      final bytes = response.data as Uint8List;
-      return await averageImageColor(bytes);
-    } catch (_) {
-      return null;
-    } finally {
-      dio.close(force: true);
-    }
+      PlayerCoverColor.instance.track(coverId);
+    });
   }
 }
 
-/// Average (dominant) color of decoded image [bytes], downscaled for speed.
+/// Dominant color of decoded image [bytes], downscaled for speed.
 /// Shared by the live cover probe and the asset-based preview probe.
-Future<Color?> averageImageColor(Uint8List bytes) async {
+Future<Color?> dominantImageColor(Uint8List bytes) async {
   if (bytes.isEmpty) return null;
   final codec = await ui.instantiateImageCodec(
     bytes,
-    targetWidth: 40,
-    targetHeight: 40,
+    targetWidth: 48,
+    targetHeight: 48,
   );
   try {
     final frame = await codec.getNextFrame();
@@ -398,20 +453,14 @@ Future<Color?> averageImageColor(Uint8List bytes) async {
       final data = await image.toByteData(format: ui.ImageByteFormat.rawRgba);
       if (data == null) return null;
       final list = data.buffer.asUint8List();
-      int r = 0;
-      int g = 0;
-      int b = 0;
-      int count = 0;
+      final pixels = <int>[];
       for (var i = 0; i + 3 < list.length; i += 4) {
-        final a = list[i + 3];
-        if (a < 10) continue;
-        r += list[i];
-        g += list[i + 1];
-        b += list[i + 2];
-        count += 1;
+        if (list[i + 3] < 10) continue;
+        pixels.add(
+          0xFF000000 | (list[i] << 16) | (list[i + 1] << 8) | list[i + 2],
+        );
       }
-      if (count == 0) return null;
-      return Color.fromARGB(255, r ~/ count, g ~/ count, b ~/ count);
+      return await dominantColorFromPixels(pixels);
     } finally {
       image.dispose();
     }
@@ -420,12 +469,39 @@ Future<Color?> averageImageColor(Uint8List bytes) async {
   }
 }
 
+/// 从 ARGB 像素中挑选最有代表性的颜色。
+///
+/// 先量化成少量色块，再按「占比 + 色彩饱满度」打分（Material You 同款
+/// 算法），多色封面不会被平均成灰/泥色；黑白/低饱和封面没有合格色块时，
+/// 退回平均色。
+@visibleForTesting
+Future<Color?> dominantColorFromPixels(List<int> argbPixels) async {
+  if (argbPixels.isEmpty) return null;
+  var r = 0;
+  var g = 0;
+  var b = 0;
+  for (final argb in argbPixels) {
+    r += (argb >> 16) & 0xFF;
+    g += (argb >> 8) & 0xFF;
+    b += argb & 0xFF;
+  }
+  final n = argbPixels.length;
+  final average = 0xFF000000 | ((r ~/ n) << 16) | ((g ~/ n) << 8) | (b ~/ n);
+  final quantized = await QuantizerCelebi().quantize(argbPixels, 64);
+  final ranked = Score.score(
+    quantized.colorToCount,
+    desired: 1,
+    fallbackColorARGB: average,
+  );
+  return Color(ranked.isEmpty ? average : ranked.first);
+}
+
 /// Dominant color of a bundled asset image, for previews that want the aurora to
 /// follow a sample cover instead of the currently playing song.
 Future<Color?> dominantColorFromAsset(String assetPath) async {
   try {
     final data = await rootBundle.load(assetPath);
-    return await averageImageColor(data.buffer.asUint8List());
+    return await dominantImageColor(data.buffer.asUint8List());
   } catch (_) {
     return null;
   }
@@ -820,29 +896,68 @@ class _VectorGradientBackground extends StatefulWidget {
 }
 
 class _VectorGradientBackgroundState extends State<_VectorGradientBackground>
-    with SingleTickerProviderStateMixin, AppRouteVisibilityMixin {
+    with TickerProviderStateMixin, AppRouteVisibilityMixin {
   static const Duration _animationDuration = Duration(seconds: 22);
 
   late AnimationController _controller;
+  late final AnimationController _colorTransitionController;
   late final int _phaseSteps;
+  late Color _fromColor;
 
   @override
   AnimationController get visibilityController => _controller;
 
   @override
+  Iterable<AnimationController> get additionalVisibilityControllers => [
+    _colorTransitionController,
+  ];
+
+  @override
   void initState() {
     super.initState();
+    _fromColor = widget.baseColor;
     _phaseSteps =
         _animationDuration.inSeconds *
         dynamicGradientFramesPerSecond(defaultTargetPlatform);
     // One slow loop drives all blob drift; long period keeps it calm/premium.
     _controller = AnimationController(vsync: this, duration: _animationDuration)
       ..repeat();
+    // 切歌换色：从当前显示的颜色平滑过渡到新封面色，而不是瞬间跳变。
+    _colorTransitionController = AnimationController(
+      vsync: this,
+      duration: dynamicGradientColorTransitionDuration,
+      value: 1,
+    );
+  }
+
+  @override
+  void didUpdateWidget(covariant _VectorGradientBackground oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.baseColor != widget.baseColor) {
+      _fromColor = _currentBaseColor(oldWidget.baseColor);
+      _colorTransitionController.forward(from: 0);
+    }
+  }
+
+  Color _currentBaseColor(Color target) {
+    final progress = Curves.easeInOut.transform(
+      _colorTransitionController.value,
+    );
+    return Color.lerp(_fromColor, target, progress) ?? target;
+  }
+
+  @override
+  void resumeVisibilityAnimation() {
+    _controller.repeat();
+    if (_colorTransitionController.value < 1) {
+      _colorTransitionController.forward();
+    }
   }
 
   @override
   void dispose() {
     _controller.dispose();
+    _colorTransitionController.dispose();
     super.dispose();
   }
 
@@ -850,7 +965,7 @@ class _VectorGradientBackgroundState extends State<_VectorGradientBackground>
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     return AnimatedBuilder(
-      animation: _controller,
+      animation: Listenable.merge([_controller, _colorTransitionController]),
       builder: (context, _) {
         final t =
             (_controller.value * _phaseSteps).floorToDouble() / _phaseSteps;
@@ -858,7 +973,7 @@ class _VectorGradientBackgroundState extends State<_VectorGradientBackground>
           size: Size.infinite,
           painter: _AuroraPainter(
             t: t,
-            base: widget.baseColor,
+            base: _currentBaseColor(widget.baseColor),
             saturation: widget.saturation,
             hueShift: widget.hueShift,
             isDark: isDark,
