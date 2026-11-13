@@ -1459,7 +1459,11 @@ class _ArtworkPlaceholder extends StatelessWidget {
     return Container(
       decoration: BoxDecoration(
         borderRadius: border,
-        color: scheme.primary.withValues(alpha: 0.12),
+        // 不透明底色：封面下方有投影，半透明会透出阴影形成「双层框」。
+        color: Color.alphaBlend(
+          scheme.primary.withValues(alpha: 0.16),
+          scheme.surfaceContainerHigh,
+        ),
       ),
       child: Center(
         child: Text(
