@@ -20,6 +20,8 @@ import '../../library/library_detail_pages.dart';
 import '../../songs/song_detail_sheet.dart';
 import 'player_audio_spec.dart';
 import 'player_background.dart';
+import 'player_seek_track.dart';
+import 'player_typography.dart';
 
 class PlayerBottomPanel extends StatelessWidget {
   final PlayerService player;
@@ -56,15 +58,15 @@ class PlayerBottomPanel extends StatelessWidget {
         children: [
           if (showMiniLyrics)
             _MiniLyricsPreview(onTap: onTapLyrics, stylePreset: stylePreset),
-          _PlayerSeekBar(player: player, stylePreset: stylePreset),
+          _PlayerSeekBar(player: player),
           PlayerAudioSpec(songListenable: player.currentSong),
-          SizedBox(height: compact ? 4 : 20),
+          SizedBox(height: compact ? 4 : 16),
           PlayerControls(
             player: player,
             stylePreset: stylePreset,
             compact: compact,
           ),
-          SizedBox(height: compact ? 6 : 30),
+          SizedBox(height: compact ? 6 : 24),
           BottomActions(player: player, stylePreset: stylePreset),
           SizedBox(height: bottomSpacing),
         ],
@@ -226,9 +228,8 @@ class _MiniLyricsPreviewState extends State<_MiniLyricsPreview>
 
 class _PlayerSeekBar extends StatefulWidget {
   final PlayerService player;
-  final PlayerStylePreset stylePreset;
 
-  const _PlayerSeekBar({required this.player, required this.stylePreset});
+  const _PlayerSeekBar({required this.player});
 
   @override
   State<_PlayerSeekBar> createState() => _PlayerSeekBarState();
@@ -256,102 +257,112 @@ class _PlayerSeekBarState extends State<_PlayerSeekBar> with SignalsMixin {
         final position = widget.player.positionSignal.value;
         final duration = widget.player.durationSignal.value;
         final buffered = widget.player.bufferedPositionSignal.value;
-        final trackHeight = switch (widget.stylePreset) {
-          PlayerStylePreset.poster => 4.0,
-          PlayerStylePreset.classic => 2.0,
-        };
         final totalMs = duration?.inMilliseconds ?? 0;
         final max = totalMs <= 0 ? 1.0 : totalMs.toDouble();
         final currentMs = position.inMilliseconds.clamp(0, max.toInt()).toInt();
-        final sliderValue = _dragValue.value ?? currentMs.toDouble();
+        final dragValue = _dragValue.value;
+        final sliderValue = dragValue ?? currentMs.toDouble();
         final bufferedRatio = totalMs > 0
             ? (buffered.inMilliseconds / totalMs).clamp(0.0, 1.0)
             : 0.0;
+        final timeStyle = PlayerTypography.time(scheme);
         return Padding(
           padding: const EdgeInsets.symmetric(horizontal: 20),
           child: Column(
             children: [
-              SizedBox(
-                height: 24,
-                child: Stack(
-                  alignment: Alignment.center,
-                  children: [
-                    // 缓冲进度（轨道下层半透明条）
-                    // horizontal: 12 与 Slider 轨道两端内缩（overlayRadius=12）对齐
-                    Positioned.fill(
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 12,
-                          vertical: 10.5,
-                        ),
-                        child: ClipRRect(
-                          borderRadius: BorderRadius.circular(2),
-                          child: LinearProgressIndicator(
-                            value: bufferedRatio,
-                            backgroundColor: Colors.transparent,
-                            valueColor: AlwaysStoppedAnimation(
-                              scheme.onSurface.withValues(alpha: 0.18),
+              // 平时细轨道、无滑块；拖动时轨道变粗、滑块浮现。
+              TweenAnimationBuilder<double>(
+                tween: Tween(end: dragValue == null ? 0 : 1),
+                duration: playerSeekTrackAnimation,
+                curve: Curves.easeOutCubic,
+                builder: (context, active, _) {
+                  final trackHeight = ui.lerpDouble(4, 7, active)!;
+                  return SizedBox(
+                    height: 24,
+                    child: Stack(
+                      alignment: Alignment.center,
+                      children: [
+                        // 缓冲进度（轨道下层半透明条）
+                        // horizontal: 12 与 Slider 轨道两端内缩（overlayRadius=12）对齐
+                        Positioned.fill(
+                          child: Padding(
+                            padding: EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: (24 - trackHeight) / 2,
                             ),
-                            minHeight: 3,
+                            child: ClipRRect(
+                              borderRadius: BorderRadius.circular(
+                                trackHeight / 2,
+                              ),
+                              child: LinearProgressIndicator(
+                                value: bufferedRatio,
+                                backgroundColor: Colors.transparent,
+                                valueColor: AlwaysStoppedAnimation(
+                                  scheme.onSurface.withValues(alpha: 0.2),
+                                ),
+                                minHeight: trackHeight,
+                              ),
+                            ),
                           ),
                         ),
-                      ),
+                        // 播放进度滑块
+                        SliderTheme(
+                          data: SliderTheme.of(context).copyWith(
+                            trackHeight: trackHeight,
+                            trackShape: const RoundedRectSliderTrackShape(),
+                            thumbShape: PlayerSeekThumbShape(
+                              preferredRadius: 6,
+                              paintRadius: 7 * active,
+                            ),
+                            overlayShape: const RoundSliderOverlayShape(
+                              overlayRadius: 12,
+                            ),
+                            overlayColor: Colors.transparent,
+                            activeTrackColor: scheme.onSurface.withValues(
+                              alpha: 0.9,
+                            ),
+                            inactiveTrackColor: scheme.onSurface.withValues(
+                              alpha: 0.12,
+                            ),
+                            thumbColor: scheme.onSurface,
+                          ),
+                          child: Slider(
+                            value: sliderValue.clamp(0, max).toDouble(),
+                            min: 0,
+                            max: max,
+                            onChanged: totalMs <= 0
+                                ? null
+                                : (value) => _dragValue.value = value,
+                            onChangeEnd: totalMs <= 0
+                                ? null
+                                : (value) {
+                                    _dragValue.value = null;
+                                    widget.player.seek(
+                                      Duration(milliseconds: value.round()),
+                                    );
+                                  },
+                          ),
+                        ),
+                      ],
                     ),
-                    // 播放进度滑块
-                    SliderTheme(
-                      data: SliderTheme.of(context).copyWith(
-                        trackHeight: trackHeight,
-                        thumbShape: const RoundSliderThumbShape(
-                          enabledThumbRadius: 6,
-                        ),
-                        overlayShape: const RoundSliderOverlayShape(
-                          overlayRadius: 12,
-                        ),
-                        activeTrackColor: scheme.onSurface,
-                        inactiveTrackColor: scheme.onSurfaceVariant.withValues(
-                          alpha: 0.25,
-                        ),
-                        thumbColor: scheme.onSurface,
-                      ),
-                      child: Slider(
-                        value: sliderValue.clamp(0, max).toDouble(),
-                        min: 0,
-                        max: max,
-                        onChanged: totalMs <= 0
-                            ? null
-                            : (value) => _dragValue.value = value,
-                        onChangeEnd: totalMs <= 0
-                            ? null
-                            : (value) {
-                                _dragValue.value = null;
-                                widget.player.seek(
-                                  Duration(milliseconds: value.round()),
-                                );
-                              },
-                      ),
-                    ),
-                  ],
-                ),
+                  );
+                },
               ),
+              // 时间标签两端与轨道内缩（12）对齐。
               Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 6),
+                padding: const EdgeInsets.symmetric(horizontal: 12),
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
                     Text(
-                      _format(Duration(milliseconds: currentMs)),
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: scheme.onSurfaceVariant.withValues(alpha: 0.7),
+                      _format(
+                        Duration(
+                          milliseconds: (dragValue ?? currentMs).round(),
+                        ),
                       ),
+                      style: timeStyle,
                     ),
-                    Text(
-                      _format(duration),
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: scheme.onSurfaceVariant.withValues(alpha: 0.7),
-                      ),
-                    ),
+                    Text(_format(duration), style: timeStyle),
                   ],
                 ),
               ),
@@ -377,15 +388,17 @@ class PlayerControls extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // 单色控件：与海报模式一致，跟随背景明暗而不是主题色块，沉浸感更强。
     final scheme = Theme.of(context).colorScheme;
-    final iconColor = scheme.primary.withValues(alpha: 0.86);
-    final buttonBg = scheme.primaryContainer.withValues(alpha: 0.92);
+    final iconColor = scheme.onSurface.withValues(alpha: 0.86);
     final mainButtonSize = compact
-        ? 48.0
+        ? 56.0
         : switch (stylePreset) {
-            PlayerStylePreset.poster => 72.0,
-            PlayerStylePreset.classic => 64.0,
+            PlayerStylePreset.poster => 76.0,
+            PlayerStylePreset.classic => 72.0,
           };
+    final mainIconSize = mainButtonSize * 0.55;
+    final skipIconSize = compact ? 32.0 : 40.0;
     return Watch.builder(
       builder: (context) {
         final playing = player.isPlayingSignal.value;
@@ -394,41 +407,45 @@ class PlayerControls extends StatelessWidget {
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             IconButton(
-              iconSize: compact ? 36 : 48,
+              iconSize: skipIconSize,
               icon: Icon(Icons.skip_previous_rounded, color: iconColor),
               onPressed: player.previous,
             ),
-            SizedBox(width: compact ? 12 : 20),
-            Container(
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: buttonBg,
-              ),
+            SizedBox(width: compact ? 16 : 28),
+            SizedBox(
+              width: mainButtonSize,
+              height: mainButtonSize,
               child: IconButton(
-                iconSize: mainButtonSize,
+                style: IconButton.styleFrom(
+                  backgroundColor: scheme.onSurface,
+                  foregroundColor: scheme.surface,
+                  shape: const CircleBorder(),
+                  padding: EdgeInsets.zero,
+                ),
+                iconSize: mainIconSize,
                 // TV 模式进播放页默认聚焦播放按钮：OK 即暂停，下键走自然遍历。
                 autofocus: AppLayoutSettings.tvMode.value,
                 icon: loading
                     ? SizedBox(
-                        width: mainButtonSize,
-                        height: mainButtonSize,
+                        width: mainIconSize * 0.8,
+                        height: mainIconSize * 0.8,
                         child: CircularProgressIndicator(
-                          strokeWidth: mainButtonSize * 0.055,
-                          color: scheme.onPrimaryContainer,
+                          strokeWidth: 2.5,
+                          color: scheme.surface,
                         ),
                       )
                     : Icon(
                         playing
                             ? Icons.pause_rounded
                             : Icons.play_arrow_rounded,
-                        color: scheme.onPrimaryContainer,
+                        color: scheme.surface,
                       ),
                 onPressed: player.togglePlayPause,
               ),
             ),
-            SizedBox(width: compact ? 12 : 20),
+            SizedBox(width: compact ? 16 : 28),
             IconButton(
-              iconSize: compact ? 36 : 48,
+              iconSize: skipIconSize,
               icon: Icon(Icons.skip_next_rounded, color: iconColor),
               onPressed: player.next,
             ),
@@ -452,15 +469,15 @@ class BottomActions extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final iconColor = scheme.onSurfaceVariant.withValues(alpha: 0.85);
+    final iconColor = scheme.onSurface.withValues(alpha: 0.7);
     return Watch.builder(
       builder: (context) {
         final mode = player.playbackModeSignal.value;
         final text = player.sleepTimerDisplayTextSignal.value;
         final icon = switch (mode) {
-          PlaybackMode.shuffle => Icons.shuffle,
-          PlaybackMode.loop => Icons.repeat,
-          PlaybackMode.single => Icons.repeat_one,
+          PlaybackMode.shuffle => Icons.shuffle_rounded,
+          PlaybackMode.loop => Icons.repeat_rounded,
+          PlaybackMode.single => Icons.repeat_one_rounded,
         };
         return AnimatedBuilder(
           animation: Listenable.merge([
@@ -493,7 +510,7 @@ class BottomActions extends StatelessWidget {
                         clipBehavior: Clip.none,
                         children: [
                           IconButton(
-                            icon: Icon(Icons.alarm, color: iconColor),
+                            icon: Icon(Icons.alarm_rounded, color: iconColor),
                             onPressed: () => _showSleepTimerSheet(context),
                           ),
                           if (text != null)
@@ -517,10 +534,7 @@ class BottomActions extends StatelessWidget {
                   if (PlayerBottomActionSettings.showPlaylist.value) {
                     actions.add(
                       IconButton(
-                        icon: Icon(
-                          Icons.format_list_bulleted,
-                          color: iconColor,
-                        ),
+                        icon: Icon(Icons.queue_music_rounded, color: iconColor),
                         onPressed: () => _showPlaylistSheet(context),
                       ),
                     );
@@ -530,7 +544,7 @@ class BottomActions extends StatelessWidget {
                   if (PlayerBottomActionSettings.showMore.value) {
                     actions.add(
                       IconButton(
-                        icon: Icon(Icons.more_horiz, color: iconColor),
+                        icon: Icon(Icons.more_horiz_rounded, color: iconColor),
                         onPressed: () => _showSongDetailSheet(context),
                       ),
                     );

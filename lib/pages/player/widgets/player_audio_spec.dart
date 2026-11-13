@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import '../../../app/services/player_service.dart';
 import '../../../app/state/song_state.dart';
 import '../../../app/utils/song_audio_spec.dart';
+import 'player_typography.dart';
 
 class PlayerAudioSpec extends StatelessWidget {
   final ValueListenable<SongEntity?> songListenable;
@@ -22,8 +23,9 @@ class PlayerAudioSpec extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final color = Theme.of(context).colorScheme.onSurfaceVariant;
-    final codecListenable = playbackCodecListenable ??
+    final scheme = Theme.of(context).colorScheme;
+    final codecListenable =
+        playbackCodecListenable ??
         PlayerService.instance.playbackTranscodeCodec;
     return AnimatedBuilder(
       animation: Listenable.merge([songListenable, codecListenable]),
@@ -35,13 +37,27 @@ class PlayerAudioSpec extends StatelessWidget {
         if (text.isEmpty) return const SizedBox.shrink();
         return Padding(
           padding: padding,
-          child: Tooltip(
-            message: '实际播放音频信息',
-            child: Text(
-              text,
-              textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 11, color: color),
-              semanticsLabel: '音频信息：${text.replaceAll('\n', '，')}',
+          child: Center(
+            child: Tooltip(
+              message: '实际播放音频信息',
+              // 小号描边标签：与转码标签同一视觉语言，不像漏排的散落文字。
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3),
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(
+                    color: scheme.onSurface.withValues(alpha: 0.18),
+                  ),
+                ),
+                child: Text(
+                  text,
+                  textAlign: TextAlign.center,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: PlayerTypography.meta(scheme),
+                  semanticsLabel: '音频信息：${text.replaceAll('\n', '，')}',
+                ),
+              ),
             ),
           ),
         );

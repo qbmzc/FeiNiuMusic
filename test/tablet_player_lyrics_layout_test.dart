@@ -181,8 +181,8 @@ void main() {
 
     // 底部功能按钮（队列/更多）同样要落在屏幕内。
     for (final icon in <IconData>[
-      Icons.format_list_bulleted,
-      Icons.more_horiz,
+      Icons.queue_music_rounded,
+      Icons.more_horiz_rounded,
     ]) {
       final finder = find.byIcon(icon);
       if (finder.evaluate().isEmpty) continue;
