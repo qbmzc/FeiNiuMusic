@@ -95,11 +95,7 @@ extension AppThemeSurfaceX on ThemeData {
   /// 模糊时用纯黑/纯白极低不透明度打底，背景清晰透出；
   /// 无模糊时保持原有半透明面板（85%）。
   Color get appPanelColor {
-    final blurEnabled = AppBackgroundSettings.panelBlurEnabled.value;
-    final panelBlur = blurEnabled
-        ? AppBackgroundSettings.panelBlurStrength.value
-        : 0.0;
-    final hasBlur = panelBlur > 0;
+    final hasBlur = AppBackgroundSettings.effectivePanelBlur > 0;
     if (hasBlur) {
       // 启用高斯模糊：底色几乎透明，模糊效果靠 BackdropFilter 实现
       final isDark = brightness == Brightness.dark;

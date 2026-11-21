@@ -158,20 +158,14 @@ class ModernNavigationBar extends StatelessWidget {
     final isDark = theme.brightness == Brightness.dark;
     // Follow the same panel blur slider used by cards/setting panels so
     // the bottom bar visually belongs to the same surface family.
-    return ValueListenableBuilder<bool>(
-      valueListenable: AppBackgroundSettings.panelBlurEnabled,
-      builder: (context, blurEnabled, _) {
-        return ValueListenableBuilder<double>(
-          valueListenable: AppBackgroundSettings.panelBlurStrength,
-          builder: (context, _, _) {
-            final blurStrength = blurEnabled
-                ? AppBackgroundSettings.panelBlurStrength.value
-                : 0.0;
-            final isBlurred = blurStrength > 0;
+    return ValueListenableBuilder<double>(
+      valueListenable: AppBackgroundSettings.effectivePanelBlurValue,
+      builder: (context, blurStrength, _) {
+        final isBlurred = blurStrength > 0;
         final barColor = isBlurred
             ? (isDark
-                ? Colors.black.withValues(alpha: 0.06)
-                : Colors.white.withValues(alpha: 0.04))
+                  ? Colors.black.withValues(alpha: 0.06)
+                  : Colors.white.withValues(alpha: 0.04))
             : scheme.surface.withValues(alpha: 0.85);
         Widget navBar = Material(
           color: barColor,
@@ -205,15 +199,16 @@ class ModernNavigationBar extends StatelessWidget {
           navBar = ClipRect(
             child: RepaintBoundary(
               child: BackdropFilter(
-                filter: ui.ImageFilter.blur(sigmaX: blurStrength, sigmaY: blurStrength),
+                filter: ui.ImageFilter.blur(
+                  sigmaX: blurStrength,
+                  sigmaY: blurStrength,
+                ),
                 child: navBar,
               ),
             ),
           );
         }
         return navBar;
-          },
-        );
       },
     );
   }

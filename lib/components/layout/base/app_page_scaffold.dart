@@ -224,8 +224,7 @@ class AppPageScaffoldState extends State<AppPageScaffold>
     return ListenableBuilder(
       listenable: Listenable.merge([
         AppLayoutSettings.effectiveTabletModeNotifier,
-        AppGlassSettings.liquidGlassEnabled,
-        AppLayoutSettings.tvMode,
+        AppGlassSettings.effectiveChanges,
       ]),
       builder: (context, _) {
         final tabletMode =

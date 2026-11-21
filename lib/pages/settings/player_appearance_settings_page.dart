@@ -185,7 +185,9 @@ class _PlayerAppearanceSettingsPageState
                 builder: (context, enabled, _) {
                   return AppSettingSwitchTile(
                     title: '动态流光',
-                    subtitle: '背景随封面颜色流动变化',
+                    subtitle: AppPerformanceSettings.streamlinedMode.value
+                        ? '流畅模式下已关闭'
+                        : '背景随封面颜色流动变化',
                     value: enabled,
                     onChanged: (value) {
                       PlayerBackgroundSettings.setDynamicGradientEnabled(value);
@@ -258,7 +260,10 @@ class _PlayerAppearanceSettingsPageState
                             builder: (context, enabled, _) {
                               return AppSettingSwitchTile(
                                 title: '旋转封面',
-                                subtitle: '播放时封面缓慢旋转',
+                                subtitle:
+                                    AppPerformanceSettings.streamlinedMode.value
+                                    ? '流畅模式下已关闭'
+                                    : '播放时封面缓慢旋转',
                                 value: enabled,
                                 onChanged: (value) {
                                   PlayerBackgroundSettings.setRotateCover(value);

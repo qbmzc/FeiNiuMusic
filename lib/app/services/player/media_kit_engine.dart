@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:media_kit/media_kit.dart' as mk;
 
+import 'media_kit_bootstrap.dart';
 import 'player_engine.dart';
 
 Future<void> seekMediaKitWhenLoaded({
@@ -142,6 +143,7 @@ class MediaKitEngine implements PlayerEngine {
   @override
   Future<void> init() async {
     if (_player != null || _disposed) return;
+    MediaKitBootstrap.ensureInitialized();
     // 默认 error 级别：mpv trace 会在每个音频帧打 demux/缓存日志（即便未播放
     // 也会刷屏，拖慢低端设备）。需要诊断 media_kit 加载/解码问题时再临时开 trace。
     final player = mk.Player(

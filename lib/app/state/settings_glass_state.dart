@@ -4,6 +4,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../services/android_platform_service.dart';
 import 'settings_background_state.dart';
 import 'settings_layout_state.dart';
+import 'settings_performance_state.dart';
 
 /// 液体玻璃（liquid_glass_widgets）设置状态。
 ///
@@ -38,13 +39,23 @@ class AppGlassSettings {
   /// 与边缘高光。
   static final ValueNotifier<double> glassThickness = ValueNotifier(30);
 
-  /// 生效值：总开关开启 **且** 非 TV 模式。
+  /// 生效值：总开关开启，且非 TV 模式、非流畅模式。
   ///
   /// TV 模式整体排除液体玻璃：玻璃组件自带 FocusNode / 键盘焦点处理，
   /// 会与 App 的 TV 方向键几何遍历（TvFocusScope / TvPlayerFocusScope）冲突。
+  /// 流畅模式排除液体玻璃：多 pass shader 在弱 GPU 上开销过大。
   static bool get effectiveEnabled {
-    return liquidGlassEnabled.value && !AppLayoutSettings.tvMode.value;
+    return liquidGlassEnabled.value &&
+        !AppLayoutSettings.tvMode.value &&
+        !AppPerformanceSettings.streamlinedMode.value;
   }
+
+  /// [effectiveEnabled] 任一来源变化时通知。
+  static final Listenable effectiveChanges = Listenable.merge([
+    liquidGlassEnabled,
+    AppLayoutSettings.tvMode,
+    AppPerformanceSettings.streamlinedMode,
+  ]);
 
   static Future<void>? _loading;
 

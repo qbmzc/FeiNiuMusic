@@ -7,7 +7,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_displaymode/flutter_displaymode.dart';
 import 'package:liquid_glass_widgets/liquid_glass_widgets.dart';
-import 'package:media_kit/media_kit.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'app/app.dart';
@@ -20,6 +19,7 @@ import 'app/services/fn_auto_reconnect_service.dart';
 import 'app/services/island_lyric_service.dart';
 import 'app/services/macos_status_bar_service.dart';
 import 'app/services/macos_app_exit_service.dart';
+import 'app/services/player/media_kit_bootstrap.dart';
 import 'app/services/player_service.dart';
 import 'app/services/desktop_lyrics_service.dart';
 import 'app/services/macos_window_background_service.dart';
@@ -62,12 +62,9 @@ Future<void> main(List<String> args) async {
   // 否则 prefs/数据库/缓存会落回系统 %APPDATA%。
   AppPortableStorage.overridePathProviderForPortable();
   // 初始化 media_kit（加载 libmpv 原生库）。必须在任何 Player() 构造前调用；
-  // 放在认证恢复之前，不依赖网络/账号状态。
-  try {
-    MediaKit.ensureInitialized();
-  } catch (e) {
-    debugPrint('MediaKit.ensureInitialized failed: $e');
-  }
+  // 放在认证恢复之前，不依赖网络/账号状态。Android 推迟到读取流畅模式之后：
+  // 流畅模式下不在启动时加载，由 MediaKitEngine 首次创建 Player 前补上。
+  if (!Platform.isAndroid) MediaKitBootstrap.ensureInitialized();
   await DebugLogService.instance.ensureLoaded();
   if (Platform.isMacOS) {
     await MacosAppExitService(
@@ -95,8 +92,26 @@ Future<void> main(List<String> args) async {
   // TV 面板固定 60Hz，强制高刷无意义甚至闪烁，因此高刷调用跳过 TV。
   await TvDetection.ensureLoaded();
   final isTvDevice = TvDetection.result.value;
+  // 流畅模式（低内存 Android 自动开启）须在高刷、media_kit 与各视觉设置之前
+  // 确定：它决定是否跳过这些高负载项。
+  await AppPerformanceSettings.ensureLoaded();
+  final imageCache = PaintingBinding.instance.imageCache;
+  AppPerformanceSettings.applyImageCacheLimits(imageCache);
+  AppPerformanceSettings.streamlinedMode.addListener(
+    () => AppPerformanceSettings.applyImageCacheLimits(imageCache),
+  );
+  final streamlined = AppPerformanceSettings.streamlinedMode.value;
+  if (streamlined) {
+    DebugLogService.instance.add(
+      '[Performance] 流畅模式已开启 ${AppPerformanceSettings.profile}',
+    );
+  }
+  if (Platform.isAndroid && !streamlined) {
+    MediaKitBootstrap.ensureInitialized();
+  }
   // flutter_displaymode 仅 Android 实现；Windows/桌面端跳过（无高刷概念）。
-  if (!isTvDevice && Platform.isAndroid) {
+  // 流畅模式跳过：低端设备切到高刷显示模式只会加重负载。
+  if (!isTvDevice && Platform.isAndroid && !streamlined) {
     await FlutterDisplayMode.setHighRefreshRate();
   }
   // 先加载设置：确保持久化的「TV 模式」手动开关已就位，再合并检测结果。
