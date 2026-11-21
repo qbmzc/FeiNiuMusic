@@ -202,6 +202,7 @@ class MainActivity : AudioServiceActivity() {
         ).setMethodCallHandler { call, result ->
             when (call.method) {
                 "isTvDevice" -> result.success(isTvDevice())
+                "getDeviceProfile" -> result.success(deviceProfile())
                 else -> result.notImplemented()
             }
         }
@@ -422,6 +423,21 @@ class MainActivity : AudioServiceActivity() {
             android.util.Log.w("MainActivity", "打开息屏通知设置失败", e)
             false
         }
+    }
+
+    /** 设备性能档案：供 Dart 侧判定是否默认开启「流畅模式」。 */
+    private fun deviceProfile(): Map<String, Any> {
+        val activityManager =
+            getSystemService(Context.ACTIVITY_SERVICE) as android.app.ActivityManager
+        val memoryInfo = android.app.ActivityManager.MemoryInfo()
+        activityManager.getMemoryInfo(memoryInfo)
+        return mapOf(
+            "sdkInt" to Build.VERSION.SDK_INT,
+            "isLowRamDevice" to activityManager.isLowRamDevice,
+            "totalMemBytes" to memoryInfo.totalMem,
+            "memoryClassMb" to activityManager.memoryClass,
+            "is64Bit" to Build.SUPPORTED_64_BIT_ABIS.isNotEmpty(),
+        )
     }
 
     /** 是否为 Android TV 设备：uiMode 类型为 TELEVISION，或设备声明 LEANBACK 特性。 */

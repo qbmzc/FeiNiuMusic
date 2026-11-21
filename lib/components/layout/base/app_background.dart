@@ -47,11 +47,12 @@ class _AppBackgroundState extends State<AppBackground> {
           AppBackgroundSettings.backgroundMaskOpacity,
           AppBackgroundSettings.backgroundBlurSigma,
           AppBackgroundSettings.pageGlowEnabled,
+          AppPerformanceSettings.streamlinedMode,
       ]),
       builder: (context, _) {
         final path = AppBackgroundSettings.backgroundImagePath.value;
         final maskOpacity = AppBackgroundSettings.backgroundMaskOpacity.value;
-        final blurSigma = AppBackgroundSettings.backgroundBlurSigma.value;
+        final blurSigma = AppBackgroundSettings.effectiveBackgroundBlurSigma;
         final glowEnabled = AppBackgroundSettings.pageGlowEnabled.value;
         final imagePath = path;
         final hasImage =

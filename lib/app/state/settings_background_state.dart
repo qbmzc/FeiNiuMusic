@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'settings_glass_state.dart';
+import 'settings_performance_state.dart';
 
 class AppBackgroundSettings {
   static const String _prefsBackgroundImagePath =
@@ -33,9 +34,25 @@ class AppBackgroundSettings {
   /// 高斯模糊总开关。关闭后 [panelBlurStrength] 视为 0，各处不渲染模糊。
   static final ValueNotifier<bool> panelBlurEnabled = ValueNotifier(true);
 
-  /// 生效的高斯模糊强度：总开关关闭时恒为 0。
+  /// 生效的高斯模糊强度：总开关关闭或流畅模式时恒为 0。
   static double get effectivePanelBlur {
+    if (AppPerformanceSettings.streamlinedMode.value) return 0.0;
     return panelBlurEnabled.value ? panelBlurStrength.value : 0.0;
+  }
+
+  /// [effectivePanelBlur] 的响应式版本：开关/强度/流畅模式变化时重算。
+  /// 面板、导航栏、迷你播放器等统一监听它，不再各自组合两个 notifier。
+  static final ValueNotifier<double> effectivePanelBlurValue =
+      _DerivedNotifier<double>(() => effectivePanelBlur, [
+        panelBlurEnabled,
+        panelBlurStrength,
+        AppPerformanceSettings.streamlinedMode,
+      ]);
+
+  /// 生效的背景图模糊：流畅模式恒为 0（跳过全屏 ImageFiltered）。
+  static double get effectiveBackgroundBlurSigma {
+    if (AppPerformanceSettings.streamlinedMode.value) return 0.0;
+    return backgroundBlurSigma.value;
   }
 
   static Future<void>? _loading;
@@ -129,5 +146,21 @@ class AppBackgroundSettings {
     if (enabled) {
       await AppGlassSettings.setLiquidGlassEnabled(false);
     }
+  }
+}
+
+/// 由若干来源派生的只读 notifier：任一来源变化时重算，值不变不通知。
+class _DerivedNotifier<T> extends ValueNotifier<T> {
+  _DerivedNotifier(this._compute, List<Listenable> sources)
+    : super(_compute()) {
+    for (final source in sources) {
+      source.addListener(_update);
+    }
+  }
+
+  final T Function() _compute;
+
+  void _update() {
+    value = _compute();
   }
 }

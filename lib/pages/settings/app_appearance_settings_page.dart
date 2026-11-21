@@ -329,6 +329,23 @@ class _AppAppearanceSettingsPageState extends State<AppAppearanceSettingsPage> {
                   );
                 },
               ),
+              // 流畅模式：低内存 Android 自动开启，关闭液体玻璃/模糊/流光等
+              // 重渲染效果；不改写这些效果自身的开关。
+              ValueListenableBuilder<bool>(
+                valueListenable: AppPerformanceSettings.streamlinedMode,
+                builder: (context, enabled, _) {
+                  return AppSettingSwitchTile(
+                    title: '流畅模式',
+                    subtitle:
+                        '${AppPerformanceSettings.statusLabel}。'
+                        '关闭液体玻璃、高斯模糊、背景模糊与动态流光，适合低配设备',
+                    value: enabled,
+                    onChanged: (value) {
+                      AppPerformanceSettings.setStreamlinedMode(value);
+                    },
+                  );
+                },
+              ),
               ValueListenableBuilder<bool>(
                 valueListenable: AppLayoutSettings.tvMode,
                 builder: (context, enabled, _) {
@@ -611,12 +628,19 @@ class _AppAppearanceSettingsPageState extends State<AppAppearanceSettingsPage> {
               // （iOS 26 风格 shader 毛玻璃/高光/折射）并自动关闭高斯模糊；
               // 关闭后回退为下方「高斯模糊/模糊强度」控制的 BackdropFilter 方案。
               // TV 模式恒不生效（见 AppGlassSettings.effectiveEnabled）。
-              ValueListenableBuilder<bool>(
-                valueListenable: AppGlassSettings.liquidGlassEnabled,
-                builder: (context, glassEnabled, _) {
+              ListenableBuilder(
+                listenable: Listenable.merge([
+                  AppGlassSettings.liquidGlassEnabled,
+                  AppPerformanceSettings.streamlinedMode,
+                ]),
+                builder: (context, _) {
+                  final glassEnabled =
+                      AppGlassSettings.liquidGlassEnabled.value;
                   return AppSettingSwitchTile(
                     title: '液体玻璃',
-                    subtitle: glassEnabled
+                    subtitle: AppPerformanceSettings.streamlinedMode.value
+                        ? '流畅模式下已关闭'
+                        : glassEnabled
                         ? '导航栏、面板、控件等使用液体玻璃材质，可调节下方模糊强度与厚度'
                         : '关闭后回退为原有的高斯模糊/实色面板',
                     value: glassEnabled,
@@ -676,12 +700,19 @@ class _AppAppearanceSettingsPageState extends State<AppAppearanceSettingsPage> {
                 },
               ),
               const SizedBox(height: 8),
-              ValueListenableBuilder<bool>(
-                valueListenable: AppBackgroundSettings.panelBlurEnabled,
-                builder: (context, blurEnabled, _) {
+              ListenableBuilder(
+                listenable: Listenable.merge([
+                  AppBackgroundSettings.panelBlurEnabled,
+                  AppPerformanceSettings.streamlinedMode,
+                ]),
+                builder: (context, _) {
+                  final blurEnabled =
+                      AppBackgroundSettings.panelBlurEnabled.value;
                   return AppSettingSwitchTile(
                     title: '高斯模糊',
-                    subtitle: blurEnabled
+                    subtitle: AppPerformanceSettings.streamlinedMode.value
+                        ? '流畅模式下已关闭（含背景图模糊）'
+                        : blurEnabled
                         ? '面板、底部音乐条等使用毛玻璃效果（会关闭液体玻璃）'
                         : '关闭后所有高斯模糊渲染',
                     value: blurEnabled,

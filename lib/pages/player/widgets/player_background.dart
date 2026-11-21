@@ -11,6 +11,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:signals_flutter/signals_flutter.dart' hide computed;
 
 import '../../../app/services/feiniu/api_client.dart';
+import '../../../app/state/settings_performance_state.dart';
 import '../../../app/state/song_state.dart';
 import '../../../app/utils/route_visibility.dart';
 
@@ -61,6 +62,16 @@ class PlayerBackgroundSettings {
   static final ValueNotifier<double> hueShift = ValueNotifier(defaultHueShift);
   static final ValueNotifier<bool> roundCover = ValueNotifier(true);
   static final ValueNotifier<bool> rotateCover = ValueNotifier(true);
+
+  /// 生效的动态流光：流畅模式下关闭，播放页回退为静态底色
+  /// （全屏逐帧重绘在弱 GPU 上开销最大）。
+  static bool get effectiveDynamicGradient =>
+      dynamicGradientEnabled.value &&
+      !AppPerformanceSettings.streamlinedMode.value;
+
+  /// 生效的封面旋转：流畅模式下关闭，避免播放时持续逐帧刷新。
+  static bool get effectiveRotateCover =>
+      rotateCover.value && !AppPerformanceSettings.streamlinedMode.value;
 
   static Future<void>? _loading;
 
@@ -372,6 +383,7 @@ class _PlayerBackgroundState extends State<PlayerBackground> {
             PlayerCoverColor.instance.color,
             PlayerBackgroundSettings.playbackThemeMode,
             PlayerBackgroundSettings.dynamicGradientEnabled,
+            AppPerformanceSettings.streamlinedMode,
             PlayerBackgroundSettings.saturation,
             PlayerBackgroundSettings.hueShift,
             PlayerBackgroundSettings.imagePath,
@@ -388,7 +400,7 @@ class _PlayerBackgroundState extends State<PlayerBackground> {
             final playbackMode =
                 PlayerBackgroundSettings.playbackThemeMode.value;
             final dynamicEnabled =
-                PlayerBackgroundSettings.dynamicGradientEnabled.value;
+                PlayerBackgroundSettings.effectiveDynamicGradient;
             final saturation = PlayerBackgroundSettings.saturation.value;
             final hueShift = PlayerBackgroundSettings.hueShift.value;
             final preferLight = _preferLightBackground(context, playbackMode);
@@ -414,7 +426,10 @@ class _PlayerBackgroundState extends State<PlayerBackground> {
               path: customPath,
               maskColor: preferLight ? Colors.white : Colors.black,
               maskOpacity: PlayerBackgroundSettings.imageMaskOpacity.value,
-              blurSigma: PlayerBackgroundSettings.imageBlurSigma.value,
+              // 流畅模式：自定义播放页背景图不做全屏模糊。
+              blurSigma: AppPerformanceSettings.streamlinedMode.value
+                  ? 0
+                  : PlayerBackgroundSettings.imageBlurSigma.value,
               fallback: fallback,
             );
           },

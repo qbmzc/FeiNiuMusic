@@ -165,65 +165,57 @@ class ModernNavigationBar extends StatelessWidget {
     final isDark = theme.brightness == Brightness.dark;
     // Follow the same panel blur slider used by cards/setting panels so
     // the bottom bar visually belongs to the same surface family.
-    return ValueListenableBuilder<bool>(
-      valueListenable: AppBackgroundSettings.panelBlurEnabled,
-      builder: (context, blurEnabled, _) {
-        return ValueListenableBuilder<double>(
-          valueListenable: AppBackgroundSettings.panelBlurStrength,
-          builder: (context, _, _) {
-            final blurStrength = blurEnabled
-                ? AppBackgroundSettings.panelBlurStrength.value
-                : 0.0;
-            final isBlurred = blurStrength > 0;
-            final barColor = isBlurred
-                ? (isDark
-                      ? Colors.black.withValues(alpha: 0.06)
-                      : Colors.white.withValues(alpha: 0.04))
-                : scheme.surface.withValues(alpha: 0.85);
-            Widget navBar = Material(
-              color: barColor,
-              elevation: 0,
-              child: SafeArea(
-                top: false,
-                child: SizedBox(
-                  // 非玻璃分支高度独立于玻璃胶囊（kSolidNavHeight，比玻璃槽位
-                  // modernNavHeight=84 矮）。底部安全区由 SafeArea 计入，不含在此值。
-                  height: kSolidNavHeight,
-                  child: Row(
-                    children: List.generate(_labels.length, (index) {
-                      final selected = currentIndex == index;
-                      return Expanded(
-                        child: _NavItem(
-                          icon: _icons[index],
-                          label: _labels[index],
-                          selected: selected,
-                          onTap: () => onTap(index),
-                        ),
-                      );
-                    }),
-                  ),
-                ),
-              ),
-            );
-            // 启用高斯模糊时包裹 BackdropFilter。
-            // RepaintBoundary 隔离模糊合成图层：页面切换转场期间底层内容变化时，
-            // 模糊结果被图层缓存复用，避免逐帧全屏重采样造成掉帧。
-            if (blurStrength > 0) {
-              navBar = ClipRect(
-                child: RepaintBoundary(
-                  child: BackdropFilter(
-                    filter: ui.ImageFilter.blur(
-                      sigmaX: blurStrength,
-                      sigmaY: blurStrength,
+    return ValueListenableBuilder<double>(
+      valueListenable: AppBackgroundSettings.effectivePanelBlurValue,
+      builder: (context, blurStrength, _) {
+        final isBlurred = blurStrength > 0;
+        final barColor = isBlurred
+            ? (isDark
+                  ? Colors.black.withValues(alpha: 0.06)
+                  : Colors.white.withValues(alpha: 0.04))
+            : scheme.surface.withValues(alpha: 0.85);
+        Widget navBar = Material(
+          color: barColor,
+          elevation: 0,
+          child: SafeArea(
+            top: false,
+            child: SizedBox(
+              // 非玻璃分支高度独立于玻璃胶囊（kSolidNavHeight，比玻璃槽位
+              // modernNavHeight=84 矮）。底部安全区由 SafeArea 计入，不含在此值。
+              height: kSolidNavHeight,
+              child: Row(
+                children: List.generate(_labels.length, (index) {
+                  final selected = currentIndex == index;
+                  return Expanded(
+                    child: _NavItem(
+                      icon: _icons[index],
+                      label: _labels[index],
+                      selected: selected,
+                      onTap: () => onTap(index),
                     ),
-                    child: navBar,
-                  ),
-                ),
-              );
-            }
-            return navBar;
-          },
+                  );
+                }),
+              ),
+            ),
+          ),
         );
+        // 启用高斯模糊时包裹 BackdropFilter。
+        // RepaintBoundary 隔离模糊合成图层：页面切换转场期间底层内容变化时，
+        // 模糊结果被图层缓存复用，避免逐帧全屏重采样造成掉帧。
+        if (blurStrength > 0) {
+          navBar = ClipRect(
+            child: RepaintBoundary(
+              child: BackdropFilter(
+                filter: ui.ImageFilter.blur(
+                  sigmaX: blurStrength,
+                  sigmaY: blurStrength,
+                ),
+                child: navBar,
+              ),
+            ),
+          );
+        }
+        return navBar;
       },
     );
   }

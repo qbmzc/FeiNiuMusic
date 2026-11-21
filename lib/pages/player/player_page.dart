@@ -785,10 +785,16 @@ class _PosterArtwork extends StatelessWidget {
                 right: 0,
                 height: frostHeight,
                 child: ClipRect(
-                  child: ImageFiltered(
-                    imageFilter: ui.ImageFilter.blur(sigmaX: 18, sigmaY: 18),
-                    child: _buildCover(context),
-                  ),
+                  // 流畅模式：不做封面模糊，直接露出封面顶部。
+                  child: AppPerformanceSettings.streamlinedMode.value
+                      ? _buildCover(context)
+                      : ImageFiltered(
+                          imageFilter: ui.ImageFilter.blur(
+                            sigmaX: 18,
+                            sigmaY: 18,
+                          ),
+                          child: _buildCover(context),
+                        ),
                 ),
               ),
               // 清晰封面：顶部透明（露出磨砂渐变）→ 中间不透明 → 底部渐隐并
@@ -1425,9 +1431,10 @@ class _RotatingArtworkState extends State<_RotatingArtwork> {
       listenable: Listenable.merge([
         PlayerService.instance.isPlaying,
         PlayerBackgroundSettings.rotateCover,
+        AppPerformanceSettings.streamlinedMode,
       ]),
       builder: (context, child) {
-        final rotateEnabled = PlayerBackgroundSettings.rotateCover.value;
+        final rotateEnabled = PlayerBackgroundSettings.effectiveRotateCover;
         return _RotatingCover(
           enabled: rotateEnabled,
           spinning:

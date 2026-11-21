@@ -585,28 +585,11 @@ class _PlayerLyricsViewState extends State<PlayerLyricsView> with SignalsMixin {
         return Column(
           children: [
             Expanded(
-              // 上下边缘渐隐遮罩：fadeEdges 关闭时全白（dstIn 无效果），
-              // 开启时上下各约 22% 高度淡出，歌词滑出边界不被硬截断。
-              child: ShaderMask(
-                blendMode: BlendMode.dstIn,
-                shaderCallback: (rect) => LinearGradient(
-                  begin: Alignment.topCenter,
-                  end: Alignment.bottomCenter,
-                  stops: const [0.0, 0.22, 0.78, 1.0],
-                  colors: widget.fadeEdges
-                      ? const [
-                          Colors.transparent,
-                          Colors.white,
-                          Colors.white,
-                          Colors.transparent,
-                        ]
-                      : const [
-                          Colors.white,
-                          Colors.white,
-                          Colors.white,
-                          Colors.white,
-                        ],
-                ).createShader(rect),
+              child: _LyricEdgeFade(
+                // 流畅模式不做渐隐：ShaderMask 在歌词滚动时每帧离屏合成。
+                enabled:
+                    widget.fadeEdges &&
+                    !AppPerformanceSettings.streamlinedMode.value,
                 child: LyricsDragToSeek(
                   enabled: dragLyrics,
                   player: player,
@@ -1179,5 +1162,34 @@ class _LyricsHueSliderState extends State<_LyricsHueSlider> {
       _dragValue = next;
     });
     widget.onChanged(next);
+  }
+}
+
+/// 歌词上下边缘渐隐遮罩：上下各约 22% 高度淡出，歌词滑出边界不被硬截断。
+/// 关闭时直接返回 [child]，不创建 ShaderMask（避免无意义的离屏图层）。
+class _LyricEdgeFade extends StatelessWidget {
+  final bool enabled;
+  final Widget child;
+
+  const _LyricEdgeFade({required this.enabled, required this.child});
+
+  @override
+  Widget build(BuildContext context) {
+    if (!enabled) return child;
+    return ShaderMask(
+      blendMode: BlendMode.dstIn,
+      shaderCallback: (rect) => const LinearGradient(
+        begin: Alignment.topCenter,
+        end: Alignment.bottomCenter,
+        stops: [0.0, 0.22, 0.78, 1.0],
+        colors: [
+          Colors.transparent,
+          Colors.white,
+          Colors.white,
+          Colors.transparent,
+        ],
+      ).createShader(rect),
+      child: child,
+    );
   }
 }

@@ -22,6 +22,7 @@ import 'feiniu/track_service.dart';
 import 'feiniu/transcode_service.dart';
 import 'network_connection_service.dart';
 import 'player/just_audio_engine.dart';
+import 'player/media_kit_bootstrap.dart';
 import 'player/media_kit_engine.dart';
 import 'player/playback_router.dart';
 import 'player/player_engine.dart';
@@ -1266,6 +1267,8 @@ class PlayerService with WidgetsBindingObserver {
     SongEntity song, {
     bool waitForLocal = false,
   }) async {
+    // 流畅模式下 Android 启动时未加载 libmpv：构造 Media 前补上。
+    MediaKitBootstrap.ensureInitialized();
     // CUE 整轨曲目：跳过本地缓存（命中会拿到整轨文件，缺失会让后台把整轨
     // 下载一份），直连流 + Media(start/end) 裁剪定位。offset 解析失败时退化为
     // 不裁剪（整轨从头播，保持现状容错）。

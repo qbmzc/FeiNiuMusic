@@ -58,14 +58,9 @@ class MiniPlayerBar extends StatelessWidget {
     // Follow the same panel blur slider as cards/settings panels so the
     // bottom music bar (which the setting description explicitly names) reacts
     // to the "高斯模糊强度" slider instead of a hardcoded blur.
-    return ValueListenableBuilder<bool>(
-      valueListenable: AppBackgroundSettings.panelBlurEnabled,
-      builder: (context, blurEnabled, _) {
-        final baseStrength = blurEnabled
-            ? AppBackgroundSettings.panelBlurStrength.value
-            : 0.0;
-        return _buildBar(context, baseStrength);
-      },
+    return ValueListenableBuilder<double>(
+      valueListenable: AppBackgroundSettings.effectivePanelBlurValue,
+      builder: (context, baseStrength, _) => _buildBar(context, baseStrength),
     );
   }
 
