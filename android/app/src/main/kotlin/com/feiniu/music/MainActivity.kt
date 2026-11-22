@@ -66,6 +66,7 @@ class MainActivity : AudioServiceActivity() {
     }
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
+        CrashRecorder.install(this)
         super.configureFlutterEngine(flutterEngine)
 
         MethodChannel(
@@ -130,6 +131,9 @@ class MainActivity : AudioServiceActivity() {
             when (call.method) {
                 "getAndroidSdkInt" -> {
                     result.success(Build.VERSION.SDK_INT)
+                }
+                "takeLastExitReport" -> {
+                    result.success(CrashRecorder.takeLastExitReport(this))
                 }
                 "saveToDownloads" -> {
                     val sourcePath = call.argument<String>("sourcePath")

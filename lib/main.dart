@@ -12,6 +12,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'app/app.dart';
 import 'app/theme/app_glass_theme.dart';
 import 'app/services/audio/stream_cache_service.dart';
+import 'app/services/android_platform_service.dart';
 import 'app/services/backup/backup_service.dart';
 import 'app/services/debug_log_service.dart';
 import 'app/services/desktop_tray_service.dart';
@@ -66,6 +67,7 @@ Future<void> main(List<String> args) async {
   // 流畅模式下不在启动时加载，由 MediaKitEngine 首次创建 Player 前补上。
   if (!Platform.isAndroid) MediaKitBootstrap.ensureInitialized();
   await DebugLogService.instance.ensureLoaded();
+  unawaited(_recordLastExitReport());
   if (Platform.isMacOS) {
     await MacosAppExitService(
       prepareForExit: () => PlayerService.instance.prepareForExit(),
@@ -363,4 +365,14 @@ void _warmupDirectIpConnection() {
   unawaited(
     FnConnectionProbeService.instance.upgradeLiveConnectionToHttpsIfRedirects(),
   );
+}
+
+/// 上次进程异常退出（闪退/被系统结束）时，把原生侧记录的原因写入调试日志，
+/// 并自动开启调试日志，方便用户在「版本信息」页复制给开发者。
+Future<void> _recordLastExitReport() async {
+  final report = await AndroidPlatformService.instance.takeLastExitReport();
+  if (report == null || report.trim().isEmpty) return;
+  final logs = DebugLogService.instance;
+  if (!logs.enabled.value) await logs.setEnabled(true);
+  logs.add('[上次异常退出]\n$report');
 }
