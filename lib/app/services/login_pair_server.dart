@@ -58,7 +58,7 @@ class LoginPairServer {
     _server = server;
 
     final port = server.port;
-    final addresses = await _localIpv4s();
+    final addresses = await localIpv4s();
     _urls = [
       for (final ip in addresses) 'http://$ip:$port/f/$_token',
     ];
@@ -130,7 +130,8 @@ class LoginPairServer {
     return List.generate(32, (_) => rnd.nextInt(16).toRadixString(16)).join();
   }
 
-  static Future<List<String>> _localIpv4s() async {
+  /// 本机局域网 IPv4 地址（跳过回环与 169.254 链路本地地址）。
+  static Future<List<String>> localIpv4s() async {
     final result = <String>[];
     final interfaces = await NetworkInterface.list(
       type: InternetAddressType.IPv4,

@@ -3,10 +3,12 @@ import 'dart:convert';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:qr_flutter/qr_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../app/services/app_update_service.dart';
 import '../../app/services/debug_log_service.dart';
+import '../../app/services/debug_log_share_server.dart';
 import '../../app/state/settings_state.dart';
 import '../../components/dialog/app_update_dialog.dart';
 import '../../components/index.dart';
@@ -118,6 +120,16 @@ class _VersionInfoPageState extends State<VersionInfoPage> {
     AppToast.show(context, '日志已导出');
   }
 
+  Future<void> _showLogQr() async {
+    await _debugLogs.ensureLoaded();
+    if (!mounted) return;
+    await showDialog<void>(
+      context: context,
+      builder: (context) => const _LogQrDialog(),
+    );
+    DebugLogShareServer.stop();
+  }
+
   @override
   Widget build(BuildContext context) {
     final bottomPadding =
@@ -217,6 +229,13 @@ class _VersionInfoPageState extends State<VersionInfoPage> {
                 trailing: const Icon(Icons.chevron_right_rounded),
                 onTap: _exportLogs,
               ),
+              AppSettingTile(
+                title: '手机扫码查看日志',
+                subtitle: '投影、电视等无法导出文件时，用同一 Wi-Fi 下的手机扫码查看',
+                leading: const Icon(Icons.qr_code_rounded),
+                trailing: const Icon(Icons.chevron_right_rounded),
+                onTap: _showLogQr,
+              ),
             ],
           ),
           const SizedBox(height: 16),
@@ -315,4 +334,85 @@ class _VersionInfoPageState extends State<VersionInfoPage> {
   }
 
   String _two(int value) => value.toString().padLeft(2, '0');
+}
+
+/// 局域网日志二维码：弹窗打开期间运行 [DebugLogShareServer]，关闭即停止。
+class _LogQrDialog extends StatefulWidget {
+  const _LogQrDialog();
+
+  @override
+  State<_LogQrDialog> createState() => _LogQrDialogState();
+}
+
+class _LogQrDialogState extends State<_LogQrDialog> {
+  late final Future<List<String>> _urls = DebugLogShareServer.start();
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return AlertDialog(
+      title: const Text('手机扫码查看日志'),
+      content: SizedBox(
+        width: 320,
+        child: FutureBuilder<List<String>>(
+          future: _urls,
+          builder: (context, snapshot) {
+            if (snapshot.connectionState != ConnectionState.done) {
+              return const SizedBox(
+                height: 120,
+                child: Center(child: CircularProgressIndicator()),
+              );
+            }
+            final urls = snapshot.data ?? const <String>[];
+            if (snapshot.hasError || urls.isEmpty) {
+              return Text(
+                '无法启动局域网服务，请确认设备已连接 Wi-Fi。'
+                '${snapshot.hasError ? '\n${snapshot.error}' : ''}',
+              );
+            }
+            return Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: QrImageView(
+                    data: urls.first,
+                    version: QrVersions.auto,
+                    size: 220,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                for (final url in urls)
+                  SelectableText(
+                    url,
+                    textAlign: TextAlign.center,
+                    style: TextStyle(fontSize: 12, color: scheme.onSurface),
+                  ),
+                const SizedBox(height: 8),
+                Text(
+                  '手机需与本机连接同一 Wi-Fi。关闭此窗口后链接失效。',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: scheme.onSurfaceVariant,
+                  ),
+                ),
+              ],
+            );
+          },
+        ),
+      ),
+      actions: [
+        TextButton(
+          autofocus: true,
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('关闭'),
+        ),
+      ],
+    );
+  }
 }
