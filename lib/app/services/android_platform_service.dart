@@ -26,6 +26,17 @@ class AndroidPlatformService {
     return _sdkInt!;
   }
 
+  /// 取出上一次进程异常退出的报告（Java 崩溃堆栈；Android 11+ 另含系统
+  /// 记录的退出原因），读取后原生侧即清除。非 Android 或无记录返回 null。
+  Future<String?> takeLastExitReport() async {
+    if (!Platform.isAndroid) return null;
+    try {
+      return await _channel.invokeMethod<String>('takeLastExitReport');
+    } catch (_) {
+      return null;
+    }
+  }
+
   Future<bool> supportsNotificationCustomActions() async {
     if (!Platform.isAndroid) return true;
     final sdk = await sdkInt();
