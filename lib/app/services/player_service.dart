@@ -1128,12 +1128,13 @@ class PlayerService with WidgetsBindingObserver {
     final bounds = _runBounds(logicalIndex);
     final targetKind = bounds.kind;
     final target = _engineFor(targetKind);
-    if (kDebugMode) {
-      debugPrint(
-        '[PlayerService] activateLocked kind=$targetKind '
-        'run=[${bounds.start},${bounds.end}] local=${bounds.localIndex}',
-      );
-    }
+    // release 同样输出（带进程 RSS），低内存设备闪退时据此判断是哪个引擎、
+    // 在多大内存占用下出的问题。
+    _debugLog(
+      'activateLocked kind=$targetKind '
+      'run=[${bounds.start},${bounds.end}] local=${bounds.localIndex} '
+      'rss=${ProcessInfo.currentRss >> 20}MB',
+    );
 
     // 切换引擎：停止旧引擎，避免双音源/旧音频线程占用输出。
     // 无论旧引擎是 just_audio 还是 media_kit 都必须 stop（不只是 pause）：

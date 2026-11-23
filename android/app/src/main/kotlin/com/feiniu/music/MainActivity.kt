@@ -138,7 +138,21 @@ class MainActivity : AudioServiceActivity() {
                     result.success(Build.VERSION.SDK_INT)
                 }
                 "takeLastExitReport" -> {
-                    result.success(CrashRecorder.takeLastExitReport(this))
+                    val appContext = applicationContext
+                    Thread {
+                        val report = CrashRecorder.takeLastExitReport(appContext)
+                        runOnUiThread { result.success(report) }
+                    }.start()
+                }
+                "readLogcat" -> {
+                    val appContext = applicationContext
+                    Thread {
+                        val current = CrashRecorder.readLogcat()
+                        val launch = CrashRecorder.launchLogcat(appContext)
+                        runOnUiThread {
+                            result.success(mapOf("launch" to launch, "current" to current))
+                        }
+                    }.start()
                 }
                 "saveToDownloads" -> {
                     val sourcePath = call.argument<String>("sourcePath")
