@@ -22,6 +22,15 @@ object CrashRecorder {
     private const val CRASH_FILE = "last_crash.txt"
     private const val PREFS = "feiniu_diagnostics"
     private const val KEY_LAST_EXIT_TS = "last_exit_timestamp"
+    private const val KEY_LAST_FATAL_LINE = "last_fatal_logcat_line"
+    private const val LAUNCH_LOGCAT_FILE = "launch_logcat.txt"
+    private const val LOGCAT_LINES = 3000
+
+    /** logcat 中标志进程异常结束的行：原生信号、Java 崩溃、tombstone 摘要。 */
+    private val FATAL_MARKERS = Regex(
+        "Fatal signal|FATAL EXCEPTION|Abort message|" +
+            " F DEBUG |backtrace:|#\\d{2} pc |Out of memory|OutOfMemoryError"
+    )
 
     @Volatile
     private var installed = false
@@ -59,7 +68,59 @@ object CrashRecorder {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             exitInfoReport(context)?.let { parts += it }
         }
+        // Android 10 及以下没有 ApplicationExitInfo：启动时抓一份 logcat 快照
+        // （此时上一进程的日志通常还在缓冲区里），从中找原生崩溃等致命行。
+        snapshotLaunchLogcat(context)?.let { parts += it }
         return if (parts.isEmpty()) null else parts.joinToString("\n\n")
+    }
+
+    /**
+     * 读取本应用（同 uid，含已结束的上一进程）在 main/system/crash 缓冲区的
+     * 最近日志。Android 4.1+ 应用无需权限即可读取自己的日志。
+     */
+    fun readLogcat(maxLines: Int = LOGCAT_LINES): String? = try {
+        val process = ProcessBuilder(
+            "logcat", "-d", "-v", "threadtime", "-t", maxLines.toString()
+        ).redirectErrorStream(true).start()
+        val text = process.inputStream.bufferedReader().use { it.readText() }
+        process.waitFor()
+        text
+    } catch (t: Throwable) {
+        Log.w(TAG, "读取 logcat 失败", t)
+        null
+    }
+
+    /** 本次启动时保存的 logcat 快照（包含上一进程结束前的日志）。 */
+    fun launchLogcat(context: Context): String? = try {
+        File(context.filesDir, LAUNCH_LOGCAT_FILE).takeIf { it.exists() }?.readText()
+    } catch (t: Throwable) {
+        Log.w(TAG, "读取启动日志快照失败", t)
+        null
+    }
+
+    /** 保存启动快照，并返回上一进程（未报告过的）致命日志摘录。 */
+    private fun snapshotLaunchLogcat(context: Context): String? {
+        val text = readLogcat() ?: return null
+        try {
+            File(context.filesDir, LAUNCH_LOGCAT_FILE).writeText(text)
+        } catch (t: Throwable) {
+            Log.w(TAG, "保存启动日志快照失败", t)
+        }
+        val myPid = android.os.Process.myPid().toString()
+        val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val lastReported = prefs.getString(KEY_LAST_FATAL_LINE, "") ?: ""
+        // threadtime 格式："MM-DD HH:MM:SS.mmm  PID  TID L TAG: msg"
+        val fatal = text.lineSequence()
+            .filter { FATAL_MARKERS.containsMatchIn(it) }
+            .filter { line ->
+                val pid = line.substring(minOf(18, line.length)).trim().substringBefore(' ')
+                pid != myPid && line.take(18) > lastReported
+            }
+            .toList()
+        if (fatal.isEmpty()) return null
+        prefs.edit().putString(KEY_LAST_FATAL_LINE, fatal.last().take(18)).apply()
+        return "logcat 中上一进程的致命日志（完整日志见「手机扫码查看日志」）：\n" +
+            fatal.takeLast(80).joinToString("\n")
     }
 
     private fun exitInfoReport(context: Context): String? {

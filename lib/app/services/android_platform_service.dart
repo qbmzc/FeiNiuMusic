@@ -26,12 +26,25 @@ class AndroidPlatformService {
     return _sdkInt!;
   }
 
-  /// 取出上一次进程异常退出的报告（Java 崩溃堆栈；Android 11+ 另含系统
-  /// 记录的退出原因），读取后原生侧即清除。非 Android 或无记录返回 null。
+  /// 取出上一次进程异常退出的报告（Java 崩溃堆栈、logcat 中的致命日志；
+  /// Android 11+ 另含系统记录的退出原因），读取后原生侧即清除。非 Android 或无记录返回 null。
   Future<String?> takeLastExitReport() async {
     if (!Platform.isAndroid) return null;
     try {
       return await _channel.invokeMethod<String>('takeLastExitReport');
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// 本应用的系统日志（logcat）：`launch` 为本次启动时保存的快照（含上一
+  /// 进程结束前的日志），`current` 为当前最新日志。非 Android 返回 null。
+  Future<({String? launch, String? current})?> readLogcat() async {
+    if (!Platform.isAndroid) return null;
+    try {
+      final map = await _channel.invokeMapMethod<String, String?>('readLogcat');
+      if (map == null) return null;
+      return (launch: map['launch'], current: map['current']);
     } catch (_) {
       return null;
     }

@@ -25,13 +25,13 @@ void main() {
       urls.isEmpty ? 'http://127.0.0.1/l/x' : urls.first,
     ).pathSegments.last;
 
-    final wrong = DebugLogShareServer.handleRequest(
+    final wrong = await DebugLogShareServer.handleRequest(
       Request('GET', Uri.parse('http://localhost/l/deadbeef')),
     );
     expect(wrong.statusCode, 404);
 
     if (urls.isEmpty) return; // 测试机无局域网地址时只校验拒绝路径
-    final ok = DebugLogShareServer.handleRequest(
+    final ok = await DebugLogShareServer.handleRequest(
       Request('GET', Uri.parse('http://localhost/l/$token')),
     );
     expect(ok.statusCode, 200);
@@ -40,12 +40,23 @@ void main() {
     expect(body, isNot(contains('<script>boom')));
   });
 
+  test('系统日志分区同样转义，空内容不输出分区', () {
+    final page = DebugLogShareServer.renderPage(
+      'app',
+      launchLogcat: 'F libc    : Fatal signal 11 <x>',
+      currentLogcat: '  ',
+    );
+    expect(page, contains('Fatal signal 11 &lt;x&gt;'));
+    expect(page, contains('id="launch"'));
+    expect(page, isNot(contains('id="current"')));
+  });
+
   test('停止后旧链接失效', () async {
     final urls = await DebugLogShareServer.start();
     DebugLogShareServer.stop();
     if (urls.isEmpty) return;
     final token = Uri.parse(urls.first).pathSegments.last;
-    final res = DebugLogShareServer.handleRequest(
+    final res = await DebugLogShareServer.handleRequest(
       Request('GET', Uri.parse('http://localhost/l/$token')),
     );
     expect(res.statusCode, 404);
