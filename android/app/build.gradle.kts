@@ -13,6 +13,9 @@ val DEFAULT_APP_ID = "com.feiniu.music"
 // CI 汽水音乐兼容包包名：仅用于 GitHub Actions 自动打包（--android-project-arg
 // applicationIdOverride=com.luna.music），本地构建不传入该属性，恒为正式包名。
 val appIdOverride: String? = project.findProperty("applicationIdOverride") as String?
+// 投影/电视精简版（TV_LITE）与正式包并存安装时使用独立应用名，CI 传
+// --android-project-arg appLabelOverride=…；未传入时保持「飞牛音乐」。
+val appLabelOverride: String? = project.findProperty("appLabelOverride") as String?
 
 android {
     // namespace 与 Kotlin 源码包名保持一致，不能随 applicationId 变化。
@@ -41,7 +44,7 @@ android {
         // 兼容包）覆盖为传入值；本地构建恒为正式包名 com.feiniu.music。
         applicationId = appIdOverride ?: DEFAULT_APP_ID
         // 应用名：正式包与汽水音乐兼容包统一为「飞牛音乐」，不区分命名。
-        manifestPlaceholders["appLabel"] = "飞牛音乐"
+        manifestPlaceholders["appLabel"] = appLabelOverride ?: "飞牛音乐"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = 27
