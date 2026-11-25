@@ -37,7 +37,9 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
-      - run: flutter pub get --enforce-lockfile
+      # 与本分支 build-validation 一致：这条分支线的 pubspec.lock 在 CI 的
+      # Flutter 版本下过不了 --enforce-lockfile（ci.yml 同样失败），先按常规解析。
+      - run: flutter pub get
       - run: flutter precache --android
       - name: Configure existing Android signing
         env:
