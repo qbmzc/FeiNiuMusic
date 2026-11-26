@@ -48,6 +48,11 @@ class TvLiteDiagnostics {
   static const Duration _interval = Duration(minutes: 1);
   static const int _frameBudgetMicros = 16667;
 
+  /// 超过该耗时的单帧逐条记日志（按时间戳对照操作），每分钟最多
+  /// [_maxSlowFrameLogs] 条，避免滚动时刷屏。
+  static const int _slowFrameMicros = 100000;
+  static const int _maxSlowFrameLogs = 10;
+
   /// Flutter 自带的帧耗时图层（遥控器菜单键或诊断页开关）。
   final ValueNotifier<bool> showPerformanceOverlay = ValueNotifier(false);
 
@@ -59,6 +64,7 @@ class TvLiteDiagnostics {
   int _janky = 0;
   int _worstBuildMicros = 0;
   int _worstRasterMicros = 0;
+  int _slowFrameLogs = 0;
 
   void start() {
     if (_timer != null) return;
@@ -96,6 +102,13 @@ class TvLiteDiagnostics {
       }
       if (build > _worstBuildMicros) _worstBuildMicros = build;
       if (raster > _worstRasterMicros) _worstRasterMicros = raster;
+      if ((build > _slowFrameMicros || raster > _slowFrameMicros) &&
+          _slowFrameLogs < _maxSlowFrameLogs) {
+        _slowFrameLogs++;
+        DebugLogService.instance.add(
+          '[TvLite] 慢帧 构建 ${build ~/ 1000}ms / 光栅 ${raster ~/ 1000}ms',
+        );
+      }
     }
   }
 
@@ -107,5 +120,6 @@ class TvLiteDiagnostics {
     _janky = 0;
     _worstBuildMicros = 0;
     _worstRasterMicros = 0;
+    _slowFrameLogs = 0;
   }
 }
