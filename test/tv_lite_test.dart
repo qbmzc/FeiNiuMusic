@@ -1,10 +1,16 @@
 import 'package:feiniu_music/app/services/feiniu/api_models.dart';
+import 'package:feiniu_music/app/services/lyrics/lyrics_service.dart';
+import 'package:feiniu_music/app/services/player_service.dart';
 import 'package:feiniu_music/app/state/song_state.dart';
 import 'package:feiniu_music/tv_lite/tv_lite_focusable.dart';
+import 'package:feiniu_music/tv_lite/tv_lite_player_page.dart';
+import 'package:feiniu_music/tv_lite/tv_lite_queue_page.dart';
 import 'package:feiniu_music/tv_lite/tv_lite_song_list.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_lyric/core/lyric_model.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 FeiNiuTrack _track(int i) => FeiNiuTrack.fromJson({
   'guid': 'g$i',
@@ -163,6 +169,85 @@ void main() {
       expect(songs.hasMore, isTrue);
       expect(songs.songs.length, lessThan(100));
       songs.dispose();
+    });
+  });
+
+  group('TvLitePlayerPage', () {
+    testWidgets('fits a 960x540 screen with lyrics and five controls', (
+      tester,
+    ) async {
+      SharedPreferences.setMockInitialValues({});
+      tester.view.physicalSize = const Size(1920, 1080);
+      tester.view.devicePixelRatio = 2;
+      addTearDown(tester.view.reset);
+      final player = PlayerService.instance;
+      final lyrics = LyricsService.instance.controller;
+      player.currentSong.value = SongEntity(
+        id: 'tv-lite-song',
+        title: '细雨',
+        artist: '[]',
+        album: '{}',
+        format: 'mp3',
+        durationMs: 200000,
+      );
+      addTearDown(() => player.currentSong.value = null);
+      await tester.pump();
+      lyrics.lyricNotifier.value = LyricModel(
+        lines: [
+          for (var i = 0; i < 20; i++)
+            LyricLine(
+              start: Duration(seconds: i * 5),
+              text: '第 $i 行',
+              translation: i == 4 ? 'line $i' : null,
+            ),
+        ],
+      );
+      lyrics.activeIndexNotifiter.value = 4;
+      addTearDown(() => lyrics.lyricNotifier.value = null);
+
+      await tester.pumpWidget(const MaterialApp(home: TvLitePlayerPage()));
+
+      expect(tester.takeException(), isNull);
+      expect(find.text('第 3 行'), findsOneWidget);
+      expect(find.text('第 4 行'), findsOneWidget);
+      expect(find.text('line 4'), findsOneWidget);
+      expect(find.text('第 5 行'), findsOneWidget);
+      expect(find.text('第 2 行'), findsNothing);
+      expect(find.text('播放列表'), findsOneWidget);
+      expect(find.byIcon(Icons.skip_next_rounded), findsOneWidget);
+    });
+  });
+
+  group('TvLiteQueuePage', () {
+    testWidgets('opens focused on the playing song', (tester) async {
+      SharedPreferences.setMockInitialValues({});
+      tester.view.physicalSize = const Size(1920, 1080);
+      tester.view.devicePixelRatio = 2;
+      addTearDown(tester.view.reset);
+      final player = PlayerService.instance;
+      player.queue.value = [
+        for (var i = 0; i < 40; i++)
+          SongEntity(
+            id: 'q$i',
+            title: 'Queue $i',
+            artist: '[]',
+            album: '{}',
+            format: 'mp3',
+          ),
+      ];
+      player.currentIndex.value = 25;
+      addTearDown(() {
+        player.queue.value = const [];
+        player.currentIndex.value = -1;
+      });
+
+      await tester.pumpWidget(const MaterialApp(home: TvLiteQueuePage()));
+      await tester.pump();
+
+      final row = find.text('Queue 25');
+      expect(row, findsOneWidget);
+      expect(Focus.of(tester.element(row)).hasPrimaryFocus, isTrue);
+      expect(find.text('Queue 0'), findsNothing);
     });
   });
 }

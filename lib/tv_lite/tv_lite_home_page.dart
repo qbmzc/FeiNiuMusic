@@ -91,6 +91,7 @@ class _TvLiteHomePageState extends State<TvLiteHomePage> {
 
   void _select(_Section section) {
     if (section == _section) return;
+    TvLiteDiagnostics.instance.logEvent('分区 ${section.label}');
     setState(() => _section = section);
   }
 
@@ -107,14 +108,18 @@ class _TvLiteHomePageState extends State<TvLiteHomePage> {
   }
 
   Future<void> _openPlayer() {
-    return Navigator.of(
-      context,
-    ).push(MaterialPageRoute<void>(builder: (_) => const TvLitePlayerPage()));
+    return Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        settings: const RouteSettings(name: '播放页'),
+        builder: (_) => const TvLitePlayerPage(),
+      ),
+    );
   }
 
   void _openPlaylist(FeiNiuPlaylist playlist) {
     Navigator.of(context).push(
       MaterialPageRoute<void>(
+        settings: const RouteSettings(name: '歌单'),
         builder: (_) => TvLitePlaylistPage(playlist: playlist, onPlay: _play),
       ),
     );
@@ -304,6 +309,7 @@ class _NowPlayingEntry extends StatelessWidget {
 Future<void> _showDiagnostics(BuildContext context) {
   return showDialog<void>(
     context: context,
+    routeSettings: const RouteSettings(name: '诊断'),
     builder: (context) => const _DiagnosticsDialog(),
   );
 }

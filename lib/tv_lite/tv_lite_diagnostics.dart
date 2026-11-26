@@ -59,6 +59,9 @@ class TvLiteDiagnostics {
   /// 最近一个完整周期的统计，诊断页展示用。
   final ValueNotifier<TvLiteStats?> lastPeriod = ValueNotifier(null);
 
+  /// 挂到 MaterialApp：每次进出页面/对话框记一行，用时间戳对照慢帧。
+  late final NavigatorObserver navigatorObserver = _RouteLogger(logEvent);
+
   Timer? _timer;
   int _frames = 0;
   int _janky = 0;
@@ -77,6 +80,12 @@ class TvLiteDiagnostics {
     _timer?.cancel();
     _timer = null;
     SchedulerBinding.instance.removeTimingsCallback(_onTimings);
+  }
+
+  /// 记一次用户操作（切页、切分区等）。帧耗时最多晚约 1 秒批量上报，
+  /// 慢帧通常紧跟在引发它的操作之后。
+  void logEvent(String event) {
+    DebugLogService.instance.add('[TvLite] 操作 $event');
   }
 
   /// 当前周期（未满一分钟）的即时统计。
@@ -121,5 +130,26 @@ class TvLiteDiagnostics {
     _worstBuildMicros = 0;
     _worstRasterMicros = 0;
     _slowFrameLogs = 0;
+  }
+}
+
+class _RouteLogger extends NavigatorObserver {
+  final void Function(String event) _log;
+
+  _RouteLogger(this._log);
+
+  static String _name(Route<dynamic>? route) {
+    if (route == null) return '?';
+    return route.settings.name ?? route.runtimeType.toString();
+  }
+
+  @override
+  void didPush(Route<dynamic> route, Route<dynamic>? previousRoute) {
+    _log('打开 ${_name(route)}');
+  }
+
+  @override
+  void didPop(Route<dynamic> route, Route<dynamic>? previousRoute) {
+    _log('返回 ${_name(previousRoute)}');
   }
 }

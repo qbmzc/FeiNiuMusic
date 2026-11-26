@@ -30,6 +30,9 @@ class _TvLiteAppState extends State<TvLiteApp> {
       seedColor: const Color(0xFF3B82F6),
       brightness: Brightness.dark,
     ),
+    // 对话框不要阴影：Skia 后端（Android 9）首次画阴影要现编着色器，
+    // 投影上打开对话框曾卡 0.4 秒。
+    dialogTheme: const DialogThemeData(elevation: 0),
     pageTransitionsTheme: const PageTransitionsTheme(
       builders: <TargetPlatform, PageTransitionsBuilder>{
         TargetPlatform.android: _NoTransitionsBuilder(),
@@ -60,6 +63,7 @@ class _TvLiteAppState extends State<TvLiteApp> {
         title: '飞牛音乐',
         debugShowCheckedModeBanner: false,
         navigatorKey: appNavigatorKey,
+        navigatorObservers: [diagnostics.navigatorObserver],
         theme: _theme,
         showPerformanceOverlay: showOverlay,
         shortcuts: <ShortcutActivator, Intent>{

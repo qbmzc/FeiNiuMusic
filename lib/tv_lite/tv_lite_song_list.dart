@@ -204,12 +204,16 @@ class TvLiteSongRow extends StatelessWidget {
   final VoidCallback onSelect;
   final bool autofocus;
 
+  /// 常亮底色，播放列表里标出正在播放的歌。
+  final bool selected;
+
   const TvLiteSongRow({
     super.key,
     required this.song,
     required this.index,
     required this.onSelect,
     this.autofocus = false,
+    this.selected = false,
   });
 
   @override
@@ -222,6 +226,7 @@ class TvLiteSongRow extends StatelessWidget {
       child: TvLiteFocusable(
         onSelect: onSelect,
         autofocus: autofocus,
+        selected: selected,
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
         child: Row(
           children: [
