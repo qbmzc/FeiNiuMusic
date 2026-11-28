@@ -1,0 +1,113 @@
+name: build-tv-lite
+run-name: TV lite build ${{ github.run_number }} @ ${{ github.sha }}
+
+# 投影/电视精简版验证构建：只打 armeabi-v7a，独立包名，可与正式版并存安装。
+on:
+  push:
+    branches: [feat/tv-lite-spike]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-tv-lite-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  FLUTTER_VERSION: c97838627ff5c275e9788839d427ab03eb1dfa01
+  PUB_HOSTED_URL: https://pub.flutter-io.cn
+  RELEASE_TAG: tv-lite-spike
+
+jobs:
+  android:
+    if: github.repository == 'qbmzc/FeiNiuMusic'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: main
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          cache: true
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      # 与本分支 build-validation 一致：这条分支线的 pubspec.lock 在 CI 的
+      # Flutter 版本下过不了 --enforce-lockfile（ci.yml 同样失败），先按常规解析。
+      - run: flutter pub get
+      - run: flutter precache --android
+      - name: Configure existing Android signing
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          test -n "$ANDROID_KEYSTORE_BASE64"
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 -d > android/app/release.keystore
+      - name: Build TV lite APK
+        env:
+          SIGNING_STORE_FILE: release.keystore
+          SIGNING_STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          SIGNING_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          SIGNING_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          flutter build apk --release --target-platform android-arm \
+            --build-number "$GITHUB_RUN_NUMBER" \
+            --dart-define=TV_LITE=true \
+            --android-project-arg applicationIdOverride=com.feiniu.music.tv \
+            --android-project-arg appLabelOverride=飞牛音乐TV
+          mkdir -p dist
+          cp build/app/outputs/flutter-apk/app-release.apk \
+            "dist/FeiNiuMusic-TV-lite-${GITHUB_RUN_NUMBER}-armeabi-v7a.apk"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tv-lite-android
+          path: dist/*.apk
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    needs: android
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: tv-lite-android
+          path: dist
+      - name: Publish TV lite prerelease
+        run: |
+          cat > notes.txt <<EOF_NOTES
+          投影/电视精简版验证包（仅 armeabi-v7a，包名 com.feiniu.music.tv，可与正式版并存）。
+
+          验证三件事：
+          1. 列表上下滚动是否流畅；
+          2. 遥控器方向键、确认键、返回键是否都好用；
+          3. 连续播放 30 分钟是否闪退或被系统杀掉。
+
+          左侧「诊断」可查看掉帧与内存，并扫码在手机上看日志（每分钟记录一行）。
+          遥控器菜单键可开关帧耗时图。
+
+          Commit: $GITHUB_SHA
+          Build: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID
+          EOF_NOTES
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            # 只保留最新一版 APK，避免投影上下载到旧包。
+            for asset in $(gh release view "$RELEASE_TAG" --json assets --jq '.assets[].name'); do
+              gh release delete-asset "$RELEASE_TAG" "$asset" --yes
+            done
+            gh release upload "$RELEASE_TAG" dist/*.apk --clobber
+            gh release edit "$RELEASE_TAG" --notes-file notes.txt \
+              --prerelease --latest=false
+          else
+            gh release create "$RELEASE_TAG" dist/*.apk --target "$GITHUB_SHA" \
+              --title "飞牛音乐 TV 精简版（验证）" --notes-file notes.txt \
+              --prerelease --latest=false
+          fi

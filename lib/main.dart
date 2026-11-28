@@ -10,6 +10,7 @@ import 'package:liquid_glass_widgets/liquid_glass_widgets.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'app/app.dart';
+import 'app/build_flavor.dart';
 import 'app/theme/app_glass_theme.dart';
 import 'app/services/audio/stream_cache_service.dart';
 import 'app/services/android_platform_service.dart';
@@ -39,6 +40,7 @@ import 'app/state/settings_lyric_companion.dart';
 import 'app/state/settings_match.dart';
 import 'app/state/settings_state.dart';
 import 'pages/player/desktop_lyrics_window.dart';
+import 'tv_lite/tv_lite_app.dart';
 
 Future<void> main(List<String> args) async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -70,6 +72,10 @@ Future<void> main(List<String> args) async {
   // 流畅模式下不在启动时加载，由 MediaKitEngine 首次创建 Player 前补上。
   if (!Platform.isAndroid) MediaKitBootstrap.ensureInitialized();
   await DebugLogService.instance.ensureLoaded();
+  // 精简版的掉帧/内存采样写入调试日志，默认开启以便扫码查看。
+  if (kTvLite && !DebugLogService.instance.enabled.value) {
+    await DebugLogService.instance.setEnabled(true);
+  }
   unawaited(_recordLastExitReport());
   if (Platform.isMacOS) {
     await MacosAppExitService(
@@ -100,6 +106,8 @@ Future<void> main(List<String> args) async {
   // 流畅模式（低内存 Android 自动开启）须在高刷、media_kit 与各视觉设置之前
   // 确定：它决定是否跳过这些高负载项。
   await AppPerformanceSettings.ensureLoaded();
+  // 精简版没有外观设置页，始终按流畅模式运行（不写入持久化设置）。
+  if (kTvLite) AppPerformanceSettings.streamlinedMode.value = true;
   final imageCache = PaintingBinding.instance.imageCache;
   AppPerformanceSettings.applyImageCacheLimits(imageCache);
   AppPerformanceSettings.streamlinedMode.addListener(
@@ -124,15 +132,20 @@ Future<void> main(List<String> args) async {
   // tvMode 会被算成 false（设置不丢失，但布局不会切到 TV）。
   await AppLayoutSettings.ensureLoaded();
   // 合并自动检测 + 设置页手动强制开关，写入 tvMode。
-  TvDetectionAutoValue.value = isTvDevice;
+  TvDetectionAutoValue.value = isTvDevice || kTvLite;
   AppLayoutSettings.syncTvMode();
   // 按设备类型锁定方向：TV 恒横屏；平板（或手动平板模式）四方向自由旋转；
   // 手机锁竖屏。运行中开关切换由 app.dart 的 _TvOrientationSync 负责再应用。
-  await SystemChrome.setPreferredOrientations(
-    AppLayoutSettings.orientationsForDevice(
-      isTv: AppLayoutSettings.tvMode.value,
-      shortestSide: AppLayoutSettings.currentShortestSide(),
-      manualTabletMode: AppLayoutSettings.tabletMode.value,
+  // 不能 await：系统或桌面先绑定媒体服务时，audio_service 会在 Activity
+  // 出现前启动引擎执行 main()，此时 flutter/platform 通道不回复，await 会让
+  // 启动永久卡住（投影首次打开黑屏）。
+  unawaited(
+    SystemChrome.setPreferredOrientations(
+      AppLayoutSettings.orientationsForDevice(
+        isTv: AppLayoutSettings.tvMode.value,
+        shortestSide: AppLayoutSettings.currentShortestSide(),
+        manualTabletMode: AppLayoutSettings.tabletMode.value,
+      ),
     ),
   );
   // 必须先恢复认证信息（token / 服务器地址）再初始化播放相关服务：
@@ -193,14 +206,14 @@ Future<void> main(List<String> args) async {
   await AppThemeSettings.ensureLoaded();
   // 切歌悬浮窗/灵动岛歌词均为 Android 系统级通知（SYSTEM_ALERT_WINDOW /
   // HyperOS 焦点通知），桌面端无对应实现，跳过启动避免无谓构造 PlayerService。
-  if (Platform.isAndroid) {
+  if (Platform.isAndroid && !kTvLite) {
     TrackChangeOverlayService.start();
   }
   // 通知歌词灵动岛监听：依赖 PlayerService 与 LyricsService 已就绪。
   // 设置懒加载（IslandLyricSettings.ensureLoaded）由设置页与 start 内部处理，
   // 默认关闭不打扰。
   await IslandLyricSettings.ensureLoaded();
-  if (Platform.isAndroid) {
+  if (Platform.isAndroid && !kTvLite) {
     IslandLyricService.start();
   }
   // 数据源匹配设置 + 服务端增强（FnMusicEnhance）设置：启动时加载。
@@ -242,7 +255,24 @@ Future<void> main(List<String> args) async {
   unawaited(StreamCacheService.instance.cleanupLegacyDirOnce());
   // 自动备份：每天首次打开 App 时静默备份到已配置的 WebDAV 目标。
   // fire-and-forget，失败不阻塞启动。
-  unawaited(BackupService.instance.maybeAutoBackupOnLaunch());
+  if (!kTvLite) unawaited(BackupService.instance.maybeAutoBackupOnLaunch());
+  // 精简版只构建自己的界面，跳过液体玻璃 shader 预热与整套手机版外壳。
+  if (kTvLite) {
+    runApp(const TvLiteApp());
+  } else {
+    await _runFullApp();
+  }
+  // Fire-and-forget warm-ups that run in parallel with the first frame so
+  // per-page initState calls don't have to pay for these cold starts:
+  //   - SharedPreferences.getInstance() reads its backing file once, then
+  //     serves subsequent callers from the in-memory instance.
+  SharedPreferences.getInstance();
+  // 后台连接预热：静默验证缓存连接的可用性，不可用时自动回退完整探测
+  // 不阻塞首页渲染，首页首次请求走已有连接，预热找到更好的 URL 会无缝切换。
+  _warmupConnection();
+}
+
+Future<void> _runFullApp() async {
   // 液体玻璃：预热 shader（非阻塞异步磁盘 I/O，0.30.x 保证 runApp 前零 GPU
   // 调用，首帧不卡顿）。开关只决定渲染哪个组件分支，此处始终初始化。
   await LiquidGlassWidgets.initialize();
@@ -272,14 +302,6 @@ Future<void> main(List<String> args) async {
       ),
     ),
   );
-  // Fire-and-forget warm-ups that run in parallel with the first frame so
-  // per-page initState calls don't have to pay for these cold starts:
-  //   - SharedPreferences.getInstance() reads its backing file once, then
-  //     serves subsequent callers from the in-memory instance.
-  SharedPreferences.getInstance();
-  // 后台连接预热：静默验证缓存连接的可用性，不可用时自动回退完整探测
-  // 不阻塞首页渲染，首页首次请求走已有连接，预热找到更好的 URL 会无缝切换。
-  _warmupConnection();
 }
 
 /// 进程级 SSL 证书校验覆盖
